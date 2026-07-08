@@ -134,6 +134,13 @@ struct {
 	__uint(max_entries, 1);
 } scratch SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(struct path_state));
+	__uint(max_entries, 1);
+} path_scratch SEC(".maps");
+
 static long (*bpf_map_delete_elem)(void *map, const void *key) = (void *)3;
 
 static __always_inline void fill_common(struct event *ev) {
@@ -154,24 +161,28 @@ static __always_inline int should_skip(void) {
 	return pid == *self;
 }
 
-static __always_inline int path_ignored(const char *path) {
+static __always_inline int path_ignored_prefix(const char *prefix) {
+	if (prefix[0] != '/') {
+		return 0;
+	}
+	if (prefix[1] == 'p' && prefix[2] == 'r') {
+		return 1;
+	}
+	if (prefix[1] == 's' && prefix[2] == 'y') {
+		return 1;
+	}
+	if (prefix[1] == 'd' && prefix[2] == 'e') {
+		return 1;
+	}
+	return 0;
+}
+
+static __always_inline int path_ignored_user(const char *path) {
 	char buf[6] = {};
 	if (bpf_probe_read_user_str(buf, sizeof(buf), path) <= 0) {
 		return 0;
 	}
-	if (buf[0] != '/') {
-		return 0;
-	}
-	if (buf[1] == 'p' && buf[2] == 'r') {
-		return 1;
-	}
-	if (buf[1] == 's' && buf[2] == 'y') {
-		return 1;
-	}
-	if (buf[1] == 'd' && buf[2] == 'e') {
-		return 1;
-	}
-	return 0;
+	return path_ignored_prefix(buf);
 }
 
 static __always_inline void set_category_action(struct event *ev, const char *category, const char *action) {
@@ -198,23 +209,34 @@ static __always_inline int read_path(char *dst, const char *src) {
 	return n > 0 ? 0 : -1;
 }
 
+static __always_inline struct path_state *path_temp(void) {
+	__u32 zero = 0;
+	return bpf_map_lookup_elem(&path_scratch, &zero);
+}
+
 static __always_inline void save_pending_open(__u32 pid, const char *path) {
-	if (path_ignored(path)) {
+	if (path_ignored_user(path)) {
 		return;
 	}
-	struct path_state state = {};
-	bpf_probe_read_user_str(state.path, sizeof(state.path), path);
-	bpf_map_update_elem(&pending_open, &pid, &state, BPF_ANY);
+	struct path_state *state = path_temp();
+	if (!state) {
+		return;
+	}
+	bpf_probe_read_user_str(state->path, sizeof(state->path), path);
+	bpf_map_update_elem(&pending_open, &pid, state, BPF_ANY);
 }
 
 static __always_inline void save_fd_path(__u32 pid, __u32 fd, const char *path) {
-	if (fd > 1024 || path_ignored(path)) {
+	if (fd > 1024 || path_ignored_user(path)) {
+		return;
+	}
+	struct path_state *state = path_temp();
+	if (!state) {
 		return;
 	}
 	struct fd_key key = {.pid = pid, .fd = fd};
-	struct path_state state = {};
-	bpf_probe_read_user_str(state.path, sizeof(state.path), path);
-	bpf_map_update_elem(&fd_path, &key, &state, BPF_ANY);
+	bpf_probe_read_user_str(state->path, sizeof(state->path), path);
+	bpf_map_update_elem(&fd_path, &key, state, BPF_ANY);
 }
 
 static __always_inline void delete_fd_path(__u32 pid, __u32 fd) {
@@ -222,14 +244,9 @@ static __always_inline void delete_fd_path(__u32 pid, __u32 fd) {
 	bpf_map_delete_elem(&fd_path, &key);
 }
 
-static __always_inline int lookup_fd_path(__u32 pid, __u32 fd, struct path_state *out) {
+static __always_inline struct path_state *lookup_fd_path(__u32 pid, __u32 fd) {
 	struct fd_key key = {.pid = pid, .fd = fd};
-	struct path_state *state = bpf_map_lookup_elem(&fd_path, &key);
-	if (!state) {
-		return -1;
-	}
-	__builtin_memcpy(out, state, sizeof(*out));
-	return 0;
+	return bpf_map_lookup_elem(&fd_path, &key);
 }
 
 static __always_inline int emit_event(void *ctx, const char *category, const char *action,
@@ -238,10 +255,10 @@ static __always_inline int emit_event(void *ctx, const char *category, const cha
 	if (should_skip()) {
 		return 0;
 	}
-	if (path && path_ignored(path)) {
+	if (path && path_ignored_user(path)) {
 		return 0;
 	}
-	if (old_path && path_ignored(old_path)) {
+	if (old_path && path_ignored_user(old_path)) {
 		return 0;
 	}
 
@@ -271,26 +288,44 @@ static __always_inline int emit_fd_io(void *ctx, const char *category, const cha
 		return 0;
 	}
 	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	struct path_state state = {};
-	if (lookup_fd_path(pid, fd, &state) < 0) {
+	struct path_state *state = lookup_fd_path(pid, fd);
+	if (!state) {
 		return emit_event(ctx, category, action, 0, 0, bytes, (__s32)fd, 0, syscall_nr);
 	}
-	if (path_ignored(state.path)) {
+	if (path_ignored_prefix(state->path)) {
 		return 0;
 	}
-	return emit_event(ctx, category, action, state.path, 0, bytes, (__s32)fd, 0, syscall_nr);
-}
 
-static __always_inline int read_sockaddr(struct sockaddr_in *dst, const void *addr) {
-	return bpf_probe_read_user(dst, sizeof(*dst), addr);
+	struct event *ev = reserve_event();
+	if (!ev) {
+		return 0;
+	}
+	fill_common(ev);
+	set_category_action(ev, category, action);
+	ev->bytes = bytes;
+	ev->fd = (__s32)fd;
+	ev->syscall_nr = (__u32)syscall_nr;
+	__builtin_memcpy(ev->path, state->path, sizeof(ev->path));
+	submit(ctx, ev);
+	return 0;
 }
 
 static __always_inline int emit_sockaddr(void *ctx, const char *action, const void *uaddr, long syscall_nr) {
 	if (should_skip() || !uaddr) {
 		return 0;
 	}
-	struct sockaddr_in addr = {};
-	if (read_sockaddr(&addr, uaddr) < 0 || addr.sin_family != 2) {
+
+	__u16 family = 0;
+	if (bpf_probe_read_user(&family, sizeof(family), uaddr) < 0 || family != 2) {
+		return emit_event(ctx, "network", action, 0, 0, 0, -1, 0, syscall_nr);
+	}
+
+	__be16 port = 0;
+	__u32 ip4 = 0;
+	if (bpf_probe_read_user(&port, sizeof(port), uaddr + 2) < 0) {
+		return emit_event(ctx, "network", action, 0, 0, 0, -1, 0, syscall_nr);
+	}
+	if (bpf_probe_read_user(&ip4, sizeof(ip4), uaddr + 4) < 0) {
 		return emit_event(ctx, "network", action, 0, 0, 0, -1, 0, syscall_nr);
 	}
 
@@ -302,11 +337,11 @@ static __always_inline int emit_sockaddr(void *ctx, const char *action, const vo
 	set_category_action(ev, "network", action);
 	ev->syscall_nr = (__u32)syscall_nr;
 	if (action[0] == 'b' || action[0] == 'l') {
-		ev->local_port = __builtin_bswap16(addr.sin_port);
-		ev->local_ip4 = addr.sin_addr;
+		ev->local_port = __builtin_bswap16(port);
+		ev->local_ip4 = ip4;
 	} else {
-		ev->remote_port = __builtin_bswap16(addr.sin_port);
-		ev->remote_ip4 = addr.sin_addr;
+		ev->remote_port = __builtin_bswap16(port);
+		ev->remote_ip4 = ip4;
 	}
 	submit(ctx, ev);
 	return 0;
