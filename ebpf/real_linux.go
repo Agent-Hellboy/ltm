@@ -47,6 +47,9 @@ type kernelEvent struct {
 	Action     [16]byte
 	Path       [128]byte
 	OldPath    [128]byte
+	SyscallNR  uint32
+	FD         int32
+	Aux        uint32
 }
 
 func (r RealCollector) Run(ctx context.Context, out chan<- storage.Event) error {
@@ -70,54 +73,38 @@ func (r RealCollector) Run(ctx context.Context, out chan<- storage.Event) error 
 	}
 	defer coll.Close()
 
-	links := make([]link.Link, 0, 10)
-	attach := func(l link.Link, err error) error {
-		if err != nil {
-			return err
-		}
-		links = append(links, l)
-		return nil
+	if err := setSelfPID(coll); err != nil {
+		return err
 	}
+
+	links := make([]link.Link, 0, len(collectorTracepoints))
 	defer func() {
 		for _, l := range links {
 			_ = l.Close()
 		}
 	}()
 
-	if err := attach(link.Tracepoint("syscalls", "sys_enter_execve", coll.Programs["trace_sys_enter_execve"], nil)); err != nil {
-		return err
-	}
-	if err := attach(link.Tracepoint("syscalls", "sys_enter_execveat", coll.Programs["trace_sys_enter_execveat"], nil)); err != nil {
-		return err
-	}
-	if err := attach(link.Tracepoint("syscalls", "sys_enter_openat", coll.Programs["trace_sys_enter_openat"], nil)); err != nil {
-		return err
-	}
-	if err := attach(link.Tracepoint("syscalls", "sys_enter_openat2", coll.Programs["trace_sys_enter_openat2"], nil)); err != nil {
-		return err
-	}
-	if err := attach(link.Tracepoint("syscalls", "sys_enter_write", coll.Programs["trace_sys_enter_write"], nil)); err != nil {
-		return err
-	}
-	if err := attach(link.Tracepoint("syscalls", "sys_enter_unlinkat", coll.Programs["trace_sys_enter_unlinkat"], nil)); err != nil {
-		return err
-	}
-	if err := attach(link.Tracepoint("syscalls", "sys_enter_renameat2", coll.Programs["trace_sys_enter_renameat2"], nil)); err != nil {
-		return err
-	}
-	if err := attach(link.Tracepoint("syscalls", "sys_enter_connect", coll.Programs["trace_sys_enter_connect"], nil)); err != nil {
-		return err
-	}
-	if err := attach(link.Tracepoint("syscalls", "sys_enter_bind", coll.Programs["trace_sys_enter_bind"], nil)); err != nil {
-		return err
-	}
-	if err := attach(link.Tracepoint("sched", "sched_process_exit", coll.Programs["trace_sched_process_exit"], nil)); err != nil {
-		return err
+	for _, tp := range collectorTracepoints {
+		prog, ok := coll.Programs[tp.Program]
+		if !ok {
+			if tp.Optional {
+				continue
+			}
+			return fmt.Errorf("missing bpf program %q", tp.Program)
+		}
+		l, err := link.Tracepoint(tp.Group, tp.Event, prog, nil)
+		if err != nil {
+			if tp.Optional {
+				continue
+			}
+			return fmt.Errorf("attach %s/%s: %w", tp.Group, tp.Event, err)
+		}
+		links = append(links, l)
 	}
 
 	perfBuf := r.BufferPages
 	if perfBuf <= 0 {
-		perfBuf = 8
+		perfBuf = 64
 	}
 	reader, err := perf.NewReader(coll.Maps["events"], perfBuf*4096)
 	if err != nil {
@@ -163,6 +150,16 @@ func (r RealCollector) Run(ctx context.Context, out chan<- storage.Event) error 
 	}
 }
 
+func setSelfPID(coll *ciliumebpf.Collection) error {
+	pidMap, ok := coll.Maps["self_pid"]
+	if !ok {
+		return nil
+	}
+	key := uint32(0)
+	pid := uint32(os.Getpid())
+	return pidMap.Update(&key, &pid, ciliumebpf.UpdateAny)
+}
+
 func convertKernelEvent(bootTime time.Time, ke kernelEvent, dropped uint64) storage.Event {
 	ev := storage.Event{
 		SchemaVersion: storage.SchemaVersion,
@@ -176,7 +173,11 @@ func convertKernelEvent(bootTime time.Time, ke kernelEvent, dropped uint64) stor
 		OldPath:       cstring(ke.OldPath[:]),
 		LocalPort:     int(ke.LocalPort),
 		RemotePort:    int(ke.RemotePort),
-		Metadata:      map[string]any{},
+		Metadata: map[string]any{
+			"syscall_nr": ke.SyscallNR,
+			"fd":         ke.FD,
+			"aux":        ke.Aux,
+		},
 		DroppedBefore: int64(dropped),
 	}
 	if ke.LocalIP4 != 0 {
@@ -188,10 +189,24 @@ func convertKernelEvent(bootTime time.Time, ke kernelEvent, dropped uint64) stor
 	if ev.Category == "process" && ev.Action == "exec" && ev.Path != "" {
 		ev.Exe = ev.Path
 	}
-	if ev.PID > 0 && ev.PPID == 0 {
+	if ev.Category == "block" {
+		ev.Metadata["dev"] = ke.Aux
+		ev.Metadata["nr_sector"] = ke.SyscallNR
+		ev.Metadata["rwbs"] = cstring(ke.Path[:])
+	}
+	if ev.Category == "process" && ev.Action == "fork" && ke.Aux != 0 {
+		ev.PPID = int(ke.Aux)
+	}
+	if ev.Category == "process" && ev.Action == "kill" && ke.FD > 0 {
+		ev.TargetPID = int(ke.FD)
+	}
+	if ev.PID > 0 && ev.PPID == 0 && ev.Action != "fork" {
 		if ppid, ok := readPPID(ev.PID); ok {
 			ev.PPID = ppid
 		}
+	}
+	if ev.Action == "listen" && ev.LocalAddr == "" && ke.FD >= 0 {
+		ev.Metadata["listen_fd"] = ke.FD
 	}
 	return ev
 }

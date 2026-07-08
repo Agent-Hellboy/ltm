@@ -47,6 +47,21 @@ echo test >> /tmp/ltm-demo.txt
 sudo ./bin/ltm stop
 ```
 
+## eBPF coverage (`--mode ebpf`)
+
+The Linux collector attaches ~60 tracepoints across:
+
+- **Process:** exec, exit, fork, clone, kill
+- **Files:** open/close, read/write, truncate, unlink, rename, link, symlink, mkdir, chmod, chown, stat, access, pipe, dup, sendfile, splice, copy_file_range
+- **Memory:** mmap, munmap, mprotect
+- **Network:** socket, connect, bind, listen, accept, sendto/recvfrom, sendmsg/recvmsg, shutdown
+- **Block:** `block_rq_issue` (real disk I/O requests)
+- **Sched:** process fork and exit
+
+BPF-side filters skip `/proc`, `/sys`, `/dev` and the daemon's own PID. FD-to-path tracking links read/write syscalls back to opened files.
+
+See `ebpf/tracepoints_linux.go` for the full hook list.
+
 ## Architecture
 
 - `ebpf/`: syscall tracepoint BPF program and Linux collector

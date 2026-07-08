@@ -100,7 +100,7 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 				Action:    ev.Action,
 			})
 			lastExit[pidKey(ev)] = ev
-		case "file:write", "file:rename":
+		case "file:write", "file:read", "file:rename":
 			report.ModifiedFiles = append(report.ModifiedFiles, FileChange{
 				Timestamp: ev.Timestamp,
 				Path:      firstNonEmpty(ev.Path, ev.OldPath),
@@ -123,7 +123,7 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 				Socket:    ev.LocalAddr + ":" + itoa(ev.LocalPort),
 				Action:    ev.Action,
 			})
-		case "network:connect":
+		case "network:connect", "network:send":
 			report.OutboundConnections = append(report.OutboundConnections, SocketChange{
 				Timestamp: ev.Timestamp,
 				PID:       ev.PID,

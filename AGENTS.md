@@ -77,6 +77,9 @@ When extending the schema, bump `storage.SchemaVersion` only if replay or query 
 - Non-Linux stub: `ebpf/real_stub.go`
 - Headers under `ebpf/headers/` are minimal MVP stubs, not full libbpf/vmlinux headers
 - x86_64 only for now (`__TARGET_ARCH_x86` in BPF build)
+- Hooks span process, file, memory, network, and block tracepoints (see `ebpf/tracepoints_linux.go`)
+- BPF-side ignores `/proc`, `/sys`, `/dev` and the daemon's own PID to reduce feedback loops
+- Rebuild `collector_bpfel.o` on Linux after BPF changes (`make ebpf`); CI does this automatically
 
 After BPF changes: rebuild the object, verify Linux build, test on a real Linux host with `sudo ltm start --mode ebpf`.
 
