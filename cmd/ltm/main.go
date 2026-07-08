@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"ltm/cli"
+	"ltm/internal/cli"
 )
 
 func main() {

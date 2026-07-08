@@ -53,4 +53,4 @@ jobs:
       - name: Build Linux binary
         run: go build -o bin/ltm ./cmd/ltm
       - name: Verify embedded object is present
-        run: test -s ebpf/collector_bpfel.o
+        run: test -s internal/ebpf/collector_bpfel.o

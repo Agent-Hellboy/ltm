@@ -11,20 +11,23 @@ Two collector modes exist:
 - `demo` — synthetic events for development and CI; no kernel privileges.
 - `ebpf` — real syscall tracepoints on Linux; requires root or BPF capabilities.
 
-## Repository map
+## Repository layout
 
-| Path | Role |
-|------|------|
-| `cmd/ltm/` | Binary entrypoint |
-| `cli/` | Commands, global flags, daemon spawn |
-| `daemon/` | Background service, batching, collector wiring |
-| `collector/` | Ignore-path filtering, bounded buffering, source fan-in |
-| `ebpf/` | BPF program (`collector.bpf.c`), embedded object, Linux collector |
-| `storage/` | Append-only store, indexes, replay on open |
-| `diff/` | Time-window machine-state diff |
-| `query/` | Deterministic query templates over stored events |
-| `tests/` | Integration script and small HTTP fixture |
-| `docs/` | Architecture and security notes |
+```text
+cmd/ltm/              binary entrypoint only
+internal/
+  cli/                commands, global flags, daemon spawn
+  daemon/             background service, batching, collector wiring
+  collector/          ignore-path filtering, bounded buffering, source fan-in
+  ebpf/               BPF C source, embedded object, Linux collector
+  storage/            append-only store, indexes, replay on open
+  diff/               time-window machine-state diff
+  query/              deterministic query templates over stored events
+tests/                integration script and small HTTP fixture
+docs/                 architecture and security notes
+```
+
+Only `cmd/` is public import surface. All implementation packages live under `internal/`.
 
 ## Build and test
 
@@ -34,10 +37,10 @@ go build -o bin/ltm ./cmd/ltm
 make integration   # demo daemon end-to-end flow
 ```
 
-On Linux, after changing `ebpf/collector.bpf.c`:
+On Linux, after changing `internal/ebpf/collector.bpf.c`:
 
 ```bash
-make ebpf          # rebuild ebpf/collector_bpfel.o (needs clang)
+make ebpf          # rebuild internal/ebpf/collector_bpfel.o (needs clang)
 go build -o bin/ltm ./cmd/ltm
 ```
 
@@ -61,34 +64,32 @@ Default paths:
 
 ## Event contract
 
-All collectors emit `storage.Event`. Keep category/action strings stable; `diff` and `query` depend on them.
+All collectors emit `storage.Event` (package `internal/storage`). Keep category/action strings stable; `diff` and `query` depend on them.
 
-Common categories: `process`, `file`, `network`.
+Common categories: `process`, `file`, `network`, `memory`, `block`.
 
-Common actions: `exec`, `exit`, `open`, `write`, `rename`, `unlink`, `bind`, `connect`, `listen`.
+Common actions: `exec`, `exit`, `open`, `write`, `read`, `rename`, `unlink`, `bind`, `connect`, `listen`.
 
 When extending the schema, bump `storage.SchemaVersion` only if replay or query behavior changes incompatibly.
 
 ## eBPF notes
 
-- BPF source: `ebpf/collector.bpf.c`
-- Embedded object: `ebpf/collector_bpfel.o` (checked in; rebuilt in CI and via `make ebpf`)
-- Linux loader: `ebpf/real_linux.go` (`//go:build linux`)
-- Non-Linux stub: `ebpf/real_stub.go`
-- Headers under `ebpf/headers/` are minimal MVP stubs, not full libbpf/vmlinux headers
+- BPF source: `internal/ebpf/collector.bpf.c`
+- Embedded object: `internal/ebpf/collector_bpfel.o` (checked in; rebuilt in CI and via `make ebpf`)
+- Linux loader: `internal/ebpf/real_linux.go` (`//go:build linux`)
+- Non-Linux stub: `internal/ebpf/real_stub.go`
+- Headers under `internal/ebpf/headers/` are minimal MVP stubs, not full libbpf/vmlinux headers
 - x86_64 only for now (`__TARGET_ARCH_x86` in BPF build)
-- Hooks span process, file, memory, network, and block tracepoints (see `ebpf/tracepoints_linux.go`)
+- Hooks span process, file, memory, network, and block tracepoints (see `internal/ebpf/tracepoints_linux.go`)
 - BPF-side ignores `/proc`, `/sys`, `/dev` and the daemon's own PID to reduce feedback loops
 - Rebuild `collector_bpfel.o` on Linux after BPF changes (`make ebpf`); CI does this automatically
-
-After BPF changes: rebuild the object, verify Linux build, test on a real Linux host with `sudo ltm start --mode ebpf`.
 
 ## Storage rules
 
 - Store is append-only JSONL.
 - `Open()` replays the file into in-memory indexes (`load()` → `applyEventLocked()`).
 - Any fix to replay must keep timeline, diff, and query consistent after restart.
-- Add or extend tests in `storage/store_test.go` for replay and query regressions.
+- Add or extend tests in `internal/storage/store_test.go` for replay and query regressions.
 
 ## Code style
 
@@ -96,7 +97,8 @@ After BPF changes: rebuild the object, verify Linux build, test on a real Linux 
 - Keep changes small and focused.
 - Prefer extending existing engines over parallel implementations.
 - No file contents in the event store — metadata only.
-- Respect ignore-path filtering in `collector/` for noisy paths (`/proc`, `/sys`, caches).
+- Respect ignore-path filtering in `internal/collector` for noisy paths (`/proc`, `/sys`, caches).
+- New implementation code belongs under `internal/`, not the repo root.
 
 ## What not to do
 
@@ -104,6 +106,7 @@ After BPF changes: rebuild the object, verify Linux build, test on a real Linux 
 - Do not commit secrets, VM credentials, or one-off host paths.
 - Do not change default ignore paths without updating `docs/security.md`.
 - Do not add unrelated docs files unless the user asks.
+- Do not import `internal/` packages from outside this module.
 
 ## Manual verification
 

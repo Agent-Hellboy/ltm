@@ -1,0 +1,77 @@
+//go:build linux
+
+package ebpf
+
+type tracepointSpec struct {
+	Group    string
+	Event    string
+	Program  string
+	Optional bool
+}
+
+var collectorTracepoints = []tracepointSpec{
+	{Group: "sched", Event: "sched_process_fork", Program: "trace_sched_process_fork"},
+	{Group: "sched", Event: "sched_process_exit", Program: "trace_sched_process_exit"},
+	{Group: "block", Event: "block_rq_issue", Program: "trace_block_rq_issue", Optional: true},
+
+	{Group: "syscalls", Event: "sys_enter_execve", Program: "trace_sys_enter_execve"},
+	{Group: "syscalls", Event: "sys_enter_execveat", Program: "trace_sys_enter_execveat"},
+	{Group: "syscalls", Event: "sys_enter_clone", Program: "trace_sys_enter_clone"},
+	{Group: "syscalls", Event: "sys_enter_clone3", Program: "trace_sys_enter_clone3", Optional: true},
+	{Group: "syscalls", Event: "sys_enter_kill", Program: "trace_sys_enter_kill"},
+	{Group: "syscalls", Event: "sys_enter_tgkill", Program: "trace_sys_enter_tgkill"},
+
+	{Group: "syscalls", Event: "sys_enter_open", Program: "trace_sys_enter_open"},
+	{Group: "syscalls", Event: "sys_enter_openat", Program: "trace_sys_enter_openat"},
+	{Group: "syscalls", Event: "sys_enter_openat2", Program: "trace_sys_enter_openat2"},
+	{Group: "syscalls", Event: "sys_exit_open", Program: "trace_sys_exit_open"},
+	{Group: "syscalls", Event: "sys_exit_openat", Program: "trace_sys_exit_openat"},
+	{Group: "syscalls", Event: "sys_exit_openat2", Program: "trace_sys_exit_openat2"},
+	{Group: "syscalls", Event: "sys_enter_close", Program: "trace_sys_enter_close"},
+	{Group: "syscalls", Event: "sys_enter_read", Program: "trace_sys_enter_read"},
+	{Group: "syscalls", Event: "sys_enter_pread64", Program: "trace_sys_enter_pread64"},
+	{Group: "syscalls", Event: "sys_enter_write", Program: "trace_sys_enter_write"},
+	{Group: "syscalls", Event: "sys_enter_pwrite64", Program: "trace_sys_enter_pwrite64"},
+	{Group: "syscalls", Event: "sys_enter_readv", Program: "trace_sys_enter_readv"},
+	{Group: "syscalls", Event: "sys_enter_writev", Program: "trace_sys_enter_writev"},
+	{Group: "syscalls", Event: "sys_enter_lseek", Program: "trace_sys_enter_lseek"},
+	{Group: "syscalls", Event: "sys_enter_truncate", Program: "trace_sys_enter_truncate"},
+	{Group: "syscalls", Event: "sys_enter_ftruncate", Program: "trace_sys_enter_ftruncate"},
+	{Group: "syscalls", Event: "sys_enter_unlinkat", Program: "trace_sys_enter_unlinkat"},
+	{Group: "syscalls", Event: "sys_enter_renameat2", Program: "trace_sys_enter_renameat2"},
+	{Group: "syscalls", Event: "sys_enter_linkat", Program: "trace_sys_enter_linkat"},
+	{Group: "syscalls", Event: "sys_enter_symlinkat", Program: "trace_sys_enter_symlinkat"},
+	{Group: "syscalls", Event: "sys_enter_mkdirat", Program: "trace_sys_enter_mkdirat"},
+	{Group: "syscalls", Event: "sys_enter_readlinkat", Program: "trace_sys_enter_readlinkat"},
+	{Group: "syscalls", Event: "sys_enter_chmod", Program: "trace_sys_enter_chmod"},
+	{Group: "syscalls", Event: "sys_enter_fchmod", Program: "trace_sys_enter_fchmod"},
+	{Group: "syscalls", Event: "sys_enter_fchmodat", Program: "trace_sys_enter_fchmodat"},
+	{Group: "syscalls", Event: "sys_enter_chown", Program: "trace_sys_enter_chown"},
+	{Group: "syscalls", Event: "sys_enter_fchown", Program: "trace_sys_enter_fchown"},
+	{Group: "syscalls", Event: "sys_enter_fchownat", Program: "trace_sys_enter_fchownat"},
+	{Group: "syscalls", Event: "sys_enter_newfstatat", Program: "trace_sys_enter_newfstatat"},
+	{Group: "syscalls", Event: "sys_enter_access", Program: "trace_sys_enter_access"},
+	{Group: "syscalls", Event: "sys_enter_faccessat", Program: "trace_sys_enter_faccessat"},
+	{Group: "syscalls", Event: "sys_enter_pipe2", Program: "trace_sys_enter_pipe2"},
+	{Group: "syscalls", Event: "sys_enter_dup", Program: "trace_sys_enter_dup"},
+	{Group: "syscalls", Event: "sys_enter_dup2", Program: "trace_sys_enter_dup2"},
+	{Group: "syscalls", Event: "sys_enter_dup3", Program: "trace_sys_enter_dup3"},
+	{Group: "syscalls", Event: "sys_enter_mmap", Program: "trace_sys_enter_mmap"},
+	{Group: "syscalls", Event: "sys_enter_munmap", Program: "trace_sys_enter_munmap"},
+	{Group: "syscalls", Event: "sys_enter_mprotect", Program: "trace_sys_enter_mprotect"},
+	{Group: "syscalls", Event: "sys_enter_sendfile", Program: "trace_sys_enter_sendfile"},
+	{Group: "syscalls", Event: "sys_enter_copy_file_range", Program: "trace_sys_enter_copy_file_range", Optional: true},
+	{Group: "syscalls", Event: "sys_enter_splice", Program: "trace_sys_enter_splice"},
+
+	{Group: "syscalls", Event: "sys_enter_socket", Program: "trace_sys_enter_socket"},
+	{Group: "syscalls", Event: "sys_enter_connect", Program: "trace_sys_enter_connect"},
+	{Group: "syscalls", Event: "sys_enter_bind", Program: "trace_sys_enter_bind"},
+	{Group: "syscalls", Event: "sys_enter_listen", Program: "trace_sys_enter_listen"},
+	{Group: "syscalls", Event: "sys_enter_accept", Program: "trace_sys_enter_accept"},
+	{Group: "syscalls", Event: "sys_enter_accept4", Program: "trace_sys_enter_accept4"},
+	{Group: "syscalls", Event: "sys_enter_sendto", Program: "trace_sys_enter_sendto"},
+	{Group: "syscalls", Event: "sys_enter_recvfrom", Program: "trace_sys_enter_recvfrom"},
+	{Group: "syscalls", Event: "sys_enter_sendmsg", Program: "trace_sys_enter_sendmsg"},
+	{Group: "syscalls", Event: "sys_enter_recvmsg", Program: "trace_sys_enter_recvmsg"},
+	{Group: "syscalls", Event: "sys_enter_shutdown", Program: "trace_sys_enter_shutdown"},
+}

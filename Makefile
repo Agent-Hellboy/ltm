@@ -7,7 +7,7 @@ build:
 	go build -o bin/ltm ./cmd/ltm
 
 ebpf:
-	cd ebpf && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
+	cd internal/ebpf && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
 		-mllvm -bpf-stack-size=1024 \
 		-c collector.bpf.c -o collector_bpfel.o -I./headers
 

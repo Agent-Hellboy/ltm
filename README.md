@@ -20,7 +20,7 @@ go test ./...
 go build -o bin/ltm ./cmd/ltm
 ```
 
-On Linux, rebuild the embedded BPF object after changing `ebpf/collector.bpf.c`:
+On Linux, rebuild the embedded BPF object after changing `internal/ebpf/collector.bpf.c`:
 
 ```bash
 make ebpf
@@ -60,18 +60,23 @@ The Linux collector attaches ~60 tracepoints across:
 
 BPF-side filters skip `/proc`, `/sys`, `/dev` and the daemon's own PID. FD-to-path tracking links read/write syscalls back to opened files.
 
-See `ebpf/tracepoints_linux.go` for the full hook list.
+See `internal/ebpf/tracepoints_linux.go` for the full hook list.
 
-## Architecture
+## Repository layout
 
-- `ebpf/`: syscall tracepoint BPF program and Linux collector
-- `collector/`: bounded ingestion and ignore-path filtering
-- `daemon/`: background service, batching, graceful shutdown
-- `storage/`: append-only local event store and query helpers
-- `diff/`: machine-state diff engine
-- `query/`: deterministic query templates
-- `cli/`: command-line entry points
-- `tests/`: unit and integration fixtures
+```text
+cmd/ltm/          CLI binary entrypoint
+internal/
+  cli/            commands and global flags
+  daemon/         background service and batching
+  collector/      ingestion, ignore rules, buffering
+  ebpf/           BPF program, embedded object, Linux loader
+  storage/        append-only event store
+  diff/           machine-state diff engine
+  query/          deterministic query templates
+tests/            integration script and fixtures
+docs/             architecture and security notes
+```
 
 ## Security
 
