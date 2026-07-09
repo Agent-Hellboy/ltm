@@ -99,6 +99,7 @@ When extending the schema, bump `storage.SchemaVersion` only if replay or query 
 - No file contents in the event store — metadata only.
 - Respect ignore-path filtering in `internal/collector` for noisy paths (`/proc`, `/sys`, caches).
 - New implementation code belongs under `internal/`, not the repo root.
+- Do not include `Co-Authored-By` trailers in commit messages.
 
 ## What not to do
 
