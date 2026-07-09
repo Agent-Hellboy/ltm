@@ -11,7 +11,7 @@ import (
 
 func TestDiffEngine(t *testing.T) {
 	t.Parallel()
-	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.log"))
+	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

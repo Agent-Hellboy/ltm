@@ -9,15 +9,21 @@ builds:
     binary: ltm
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
       - arm64
+    # The full stack is pure Go now (modernc.org/sqlite + cilium/ebpf), so CGO
+    # is unnecessary and cross-compilation needs no C toolchain.
     env:
-      - CGO_ENABLED=1
+      - CGO_ENABLED=0
     flags:
       - -trimpath
     ldflags:
       - -s -w
+      - -X ltm/internal/cli.Version={{ .Version }}
+      - -X ltm/internal/cli.Commit={{ .Commit }}
+      - -X ltm/internal/cli.Date={{ .Date }}
 
 archives:
   - format: tar.gz

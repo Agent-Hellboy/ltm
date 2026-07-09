@@ -8,10 +8,14 @@
 - `ltm start --mode ebpf` — real syscall tracepoint collection on Linux
 - `ltm stop`
 - `ltm status`
-- `ltm timeline --since 1h`
+- `ltm timeline --since 1h [--pid] [--uid] [--comm] [--category] [--action] [--path] [--exe] [--until] [--limit]`
+- `ltm watch [--interval 1s] [--since 10m] [--category] [--comm] [--pid]` — live tail of new events
 - `ltm diff --from "2026-07-08 14:00" --to now`
-- `ltm query "who modified /etc/nginx/nginx.conf?"`
+- `ltm query "who modified /etc/nginx/nginx.conf?"` — plain English; uses a configured agent CLI when available, deterministic templates otherwise
+- `ltm query sql "SELECT comm, count(*) FROM events GROUP BY comm ORDER BY 2 DESC"` — arbitrary read-only SQL; run with no query to print the schema (`ltm sql` is a shorthand)
+- `ltm prune --older-than 720h`
 - `ltm benchmark --count 1000`
+- `ltm version` — build version, commit, and platform
 
 ## Build
 
@@ -32,6 +36,7 @@ make ebpf
 ./bin/ltm start --mode demo
 ./bin/ltm status
 ./bin/ltm timeline --since 1h
+./bin/ltm watch --interval 1s          # live tail; Ctrl-C to stop
 ./bin/ltm diff --from "2026-07-08 14:00" --to now
 ./bin/ltm query "who modified /tmp/ltm-demo.txt?"
 ./bin/ltm stop
@@ -62,6 +67,38 @@ BPF-side filters skip `/proc`, `/sys`, `/dev` and the daemon's own PID. FD-to-pa
 
 See `internal/ebpf/tracepoints_linux.go` for the full hook list.
 
+## Storage
+
+Events live in a single SQLite database (`~/.local/share/ltm/ltm.db` by default), written in WAL mode by the daemon's writer connection. Every other command (`status`, `timeline`, `diff`, `query`, `sql`) opens the database read-only with `PRAGMA query_only=ON`, so reads never contend with the writer and can never accidentally mutate the log.
+
+Query power is exposed two ways:
+
+- Structured filters on `ltm timeline`: `--pid`, `--uid`, `--comm`, `--category`, `--action` are repeatable; `--path` and `--exe` take SQL `LIKE` patterns (`%` wildcard); `--since`/`--until` accept a duration (`10m`) or absolute time.
+- `ltm query sql "<SELECT ...>"` for anything the filters don't cover — arbitrary read-only SQL against the `events` table. Run it with no query to print the table schema and example queries. `ltm sql` is a shorthand.
+
+`ltm prune --older-than <duration>` deletes events past a cutoff and reclaims disk space with `VACUUM`.
+
+## Agent-assisted queries
+
+`ltm query "<plain English question>"` can hand the question to a locally installed coding agent, which writes the SQL for you:
+
+```bash
+export LTM_AGENT=claude          # or: codex, cursor, gemini, auto, or a custom command
+ltm query "which process wrote to files the most in the last day?"
+```
+
+```text
+[claude] SELECT comm, exe, pid, COUNT(*) AS write_count FROM events WHERE category = 'file' ...
+comm             pid   write_count
+demo-worker-0    4200  1
+...
+```
+
+- Configure with the `--agent` flag or the `LTM_AGENT` environment variable. Known names: `claude` (Claude Code), `codex` (OpenAI Codex), `cursor` (cursor-agent), `gemini` (Gemini CLI). `auto` picks the first one found on PATH. Anything else is treated as a custom command; the prompt is appended as the final argument.
+- The generated SQL is printed (stderr in table mode, in the payload with `--json`) so you always see what ran.
+- The agent's SQL executes on the read-only connection (`PRAGMA query_only=ON`) and is rejected unless it is a single `SELECT` — a misbehaving agent cannot modify the event log.
+- With no agent configured, or if the agent fails, `ltm query` falls back to the built-in deterministic templates.
+
 ## Repository layout
 
 ```text
@@ -71,7 +108,7 @@ internal/
   daemon/         background service and batching
   collector/      ingestion, ignore rules, buffering
   ebpf/           BPF program, embedded object, Linux loader
-  storage/        append-only event store
+  storage/        SQLite-backed event store, filters, prune
   diff/           machine-state diff engine
   query/          deterministic query templates
 tests/            integration script and fixtures

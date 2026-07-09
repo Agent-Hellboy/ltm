@@ -11,15 +11,25 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
+	"ltm/internal/agent"
 	"ltm/internal/daemon"
 	"ltm/internal/diff"
 	"ltm/internal/query"
 	"ltm/internal/storage"
+)
+
+// Build information, overridden at link time via -ldflags -X (see .goreleaser.yaml).
+var (
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
 )
 
 type Config struct {
@@ -36,7 +46,7 @@ func defaultConfig() Config {
 		home = "."
 	}
 	return Config{
-		DBPath:  filepath.Join(home, ".local", "share", "ltm", "ltm.log"),
+		DBPath:  filepath.Join(home, ".local", "share", "ltm", "ltm.db"),
 		PIDFile: filepath.Join(home, ".local", "run", "ltm.pid"),
 		Mode:    "demo",
 		IgnorePaths: []string{
@@ -54,6 +64,11 @@ func Execute() error {
 	args := os.Args[1:]
 	args, err := parseGlobalFlags(args, &cfg)
 	if err != nil {
+		// `-h`/`--help` before a subcommand surfaces as flag.ErrHelp.
+		if errors.Is(err, flag.ErrHelp) {
+			printRootHelp(os.Stdout)
+			return nil
+		}
 		return err
 	}
 	if len(args) == 0 {
@@ -69,6 +84,8 @@ func Execute() error {
 		return runStatus(cfg, args[1:])
 	case "timeline":
 		return runTimeline(cfg, args[1:])
+	case "watch":
+		return runWatch(cfg, args[1:])
 	case "diff":
 		return runDiff(cfg, args[1:])
 	case "query":
@@ -77,6 +94,12 @@ func Execute() error {
 		return runBenchmark(cfg, args[1:])
 	case "daemon":
 		return runDaemon(cfg, args[1:])
+	case "sql":
+		return runSQL(cfg, args[1:])
+	case "prune":
+		return runPrune(cfg, args[1:])
+	case "version", "-v", "--version":
+		return printVersion(os.Stdout, cfg.JSON)
 	case "-h", "--help", "help":
 		printRootHelp(os.Stdout)
 		return nil
@@ -110,6 +133,27 @@ func (m *multiStringFlag) String() string {
 
 func (m *multiStringFlag) Set(v string) error {
 	m.values = append(m.values, v)
+	return nil
+}
+
+type multiIntFlag struct {
+	values []int
+}
+
+func (m *multiIntFlag) String() string {
+	parts := make([]string, len(m.values))
+	for i, v := range m.values {
+		parts[i] = strconv.Itoa(v)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (m *multiIntFlag) Set(v string) error {
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return err
+	}
+	m.values = append(m.values, n)
 	return nil
 }
 
@@ -170,7 +214,7 @@ func runStatus(cfg Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	store, err := storage.Open(cfg.DBPath)
+	store, err := storage.OpenReadOnly(cfg.DBPath)
 	if err != nil {
 		return err
 	}
@@ -196,28 +240,174 @@ func runStatus(cfg Config, args []string) error {
 func runTimeline(cfg Config, args []string) error {
 	fs := flag.NewFlagSet("timeline", flag.ContinueOnError)
 	since := fs.String("since", "1h", "show events since duration or absolute time")
+	until := fs.String("until", "now", "show events until duration or absolute time")
 	limit := fs.Int("limit", 200, "maximum number of events")
 	jsonOut := fs.Bool("json", cfg.JSON, "json output")
+	var pids, uids multiIntFlag
+	var categories, actions, comms multiStringFlag
+	pathLike := fs.String("path", "", "filter by path (SQL LIKE pattern, % wildcard)")
+	exeLike := fs.String("exe", "", "filter by exe (SQL LIKE pattern, % wildcard)")
+	fs.Var(&pids, "pid", "filter by pid (repeatable)")
+	fs.Var(&uids, "uid", "filter by uid (repeatable)")
+	fs.Var(&categories, "category", "filter by category (repeatable)")
+	fs.Var(&actions, "action", "filter by action (repeatable)")
+	fs.Var(&comms, "comm", "filter by process name (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	store, err := storage.Open(cfg.DBPath)
+	store, err := storage.OpenReadOnly(cfg.DBPath)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	sinceTime, err := parseDurationOrTime(*since, time.Now())
+	now := time.Now()
+	sinceTime, err := parseDurationOrTime(*since, now)
 	if err != nil {
 		return err
 	}
-	events, err := store.EventsSince(context.Background(), sinceTime, *limit)
+	untilTime, err := parseDurationOrTime(*until, now)
 	if err != nil {
 		return err
+	}
+	events, err := store.Query(context.Background(), storage.Filter{
+		From:       sinceTime,
+		To:         untilTime,
+		PIDs:       pids.values,
+		UIDs:       uids.values,
+		Categories: categories.values,
+		Actions:    actions.values,
+		Comms:      comms.values,
+		PathLike:   *pathLike,
+		ExeLike:    *exeLike,
+		Limit:      *limit,
+	})
+	if err != nil {
+		return err
+	}
+	// timeline reads newest-first from Query; display oldest-first.
+	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+		events[i], events[j] = events[j], events[i]
 	}
 	if *jsonOut {
 		return writeJSON(os.Stdout, events)
 	}
 	return printEvents(os.Stdout, events)
+}
+
+func runWatch(cfg Config, args []string) error {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	interval := fs.Duration("interval", time.Second, "poll interval")
+	since := fs.String("since", "", "backfill events since this duration/time before tailing (default: only new events)")
+	limit := fs.Int("limit", 500, "maximum events fetched per poll")
+	var comms, categories multiStringFlag
+	var pids multiIntFlag
+	fs.Var(&comms, "comm", "only show this process name (repeatable)")
+	fs.Var(&pids, "pid", "only show this pid (repeatable)")
+	fs.Var(&categories, "category", "only show this category (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	store, err := storage.OpenReadOnly(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	match := watchPredicate(categories.values, comms.values, pids.values)
+	ctx, cancel := signalContext()
+	defer cancel()
+
+	var lastID int64
+	if *since != "" {
+		start, err := parseDurationOrTime(*since, time.Now())
+		if err != nil {
+			return err
+		}
+		events, err := store.EventsBetween(ctx, start, time.Now(), *limit)
+		if err != nil {
+			return err
+		}
+		for _, ev := range events {
+			if match(ev) {
+				fmt.Fprintln(os.Stdout, formatEvent(ev))
+			}
+			if ev.ID > lastID {
+				lastID = ev.ID
+			}
+		}
+	}
+	if lastID == 0 {
+		if lastID, err = store.LatestEventID(ctx); err != nil {
+			return err
+		}
+	}
+
+	ticker := time.NewTicker(*interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			lastID, err = watchStep(ctx, store, lastID, *limit, match, os.Stdout)
+			if err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// watchStep fetches events newer than lastID, prints those matching the
+// predicate, and returns the new high-water id. Split out from runWatch so it
+// can be tested without tickers or signals.
+func watchStep(ctx context.Context, store *storage.Store, lastID int64, limit int, match func(storage.Event) bool, w io.Writer) (int64, error) {
+	events, err := store.EventsAfterID(ctx, lastID, limit)
+	if err != nil {
+		return lastID, err
+	}
+	for _, ev := range events {
+		if match(ev) {
+			if _, err := io.WriteString(w, formatEvent(ev)+"\n"); err != nil {
+				return lastID, err
+			}
+		}
+		if ev.ID > lastID {
+			lastID = ev.ID
+		}
+	}
+	return lastID, nil
+}
+
+func watchPredicate(categories, comms []string, pids []int) func(storage.Event) bool {
+	catSet := sliceToSet(categories)
+	commSet := sliceToSet(comms)
+	pidSet := make(map[int]bool, len(pids))
+	for _, p := range pids {
+		pidSet[p] = true
+	}
+	return func(ev storage.Event) bool {
+		if len(catSet) > 0 && !catSet[ev.Category] {
+			return false
+		}
+		if len(commSet) > 0 && !commSet[ev.Comm] {
+			return false
+		}
+		if len(pidSet) > 0 && !pidSet[ev.PID] {
+			return false
+		}
+		return true
+	}
+}
+
+func sliceToSet(items []string) map[string]bool {
+	if len(items) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(items))
+	for _, item := range items {
+		set[item] = true
+	}
+	return set
 }
 
 func runDiff(cfg Config, args []string) error {
@@ -228,7 +418,7 @@ func runDiff(cfg Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	store, err := storage.Open(cfg.DBPath)
+	store, err := storage.OpenReadOnly(cfg.DBPath)
 	if err != nil {
 		return err
 	}
@@ -255,14 +445,39 @@ func runDiff(cfg Config, args []string) error {
 func runQuery(cfg Config, args []string) error {
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", cfg.JSON, "json output")
+	agentSpec := fs.String("agent", os.Getenv("LTM_AGENT"),
+		"agent CLI for plain-English questions: claude, codex, cursor, gemini, auto, or a custom command (env LTM_AGENT)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	question := strings.TrimSpace(strings.Join(fs.Args(), " "))
-	if question == "" {
-		return errors.New("query requires a question")
+	rest := fs.Args()
+
+	// `ltm query sql "<SELECT ...>"` runs exact SQL; no query prints the schema.
+	if len(rest) > 0 && rest[0] == "sql" {
+		sqlText := strings.TrimSpace(strings.Join(rest[1:], " "))
+		if sqlText == "" {
+			_, err := io.WriteString(os.Stdout, sqlSchemaHelp)
+			return err
+		}
+		return execReadOnlySQL(cfg, sqlText, *jsonOut)
 	}
-	store, err := storage.Open(cfg.DBPath)
+
+	question := strings.TrimSpace(strings.Join(rest, " "))
+	if question == "" {
+		return errors.New(`query requires a question or: query sql "<SELECT ...>"`)
+	}
+
+	if a, err := agent.Resolve(*agentSpec); err != nil {
+		return err
+	} else if a != nil {
+		if err := runAgentQuery(cfg, a, question, *jsonOut); err == nil {
+			return nil
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: %v; falling back to built-in templates\n", err)
+		}
+	}
+
+	store, err := storage.OpenReadOnly(cfg.DBPath)
 	if err != nil {
 		return err
 	}
@@ -276,6 +491,42 @@ func runQuery(cfg Config, args []string) error {
 		return writeJSON(os.Stdout, result)
 	}
 	return printQueryResult(os.Stdout, result)
+}
+
+func runAgentQuery(cfg Config, a *agent.Agent, question string, jsonOut bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	sqlText, err := a.GenerateSQL(ctx, question)
+	if err != nil {
+		return err
+	}
+	store, err := storage.OpenReadOnly(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	cols, rows, err := store.RawSQL(ctx, sqlText)
+	if err != nil {
+		return fmt.Errorf("agent %s produced invalid SQL (%v): %s", a.Name, err, sqlText)
+	}
+	if jsonOut {
+		out := make([]map[string]any, 0, len(rows))
+		for _, row := range rows {
+			m := make(map[string]any, len(cols))
+			for i, c := range cols {
+				m[c] = row[i]
+			}
+			out = append(out, m)
+		}
+		return writeJSON(os.Stdout, map[string]any{
+			"question": question,
+			"agent":    a.Name,
+			"sql":      sqlText,
+			"rows":     out,
+		})
+	}
+	fmt.Fprintf(os.Stderr, "[%s] %s\n", a.Name, sqlText)
+	return printSQLTable(os.Stdout, cols, rows)
 }
 
 func runBenchmark(cfg Config, args []string) error {
@@ -298,6 +549,68 @@ func runBenchmark(cfg Config, args []string) error {
 	elapsed := time.Since(start)
 	throughput := float64(len(events)) / elapsed.Seconds()
 	fmt.Fprintf(os.Stdout, "events/sec=%.0f dropped=%d db_write_latency_ms=%d\n", throughput, stats.Dropped, stats.WriteLatency.Milliseconds())
+	return nil
+}
+
+// runSQL keeps `ltm sql` as a shorthand for `ltm query sql`.
+func runSQL(cfg Config, args []string) error {
+	fs := flag.NewFlagSet("sql", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", cfg.JSON, "json output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	query := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if query == "" {
+		_, err := io.WriteString(os.Stdout, sqlSchemaHelp)
+		return err
+	}
+	return execReadOnlySQL(cfg, query, *jsonOut)
+}
+
+func execReadOnlySQL(cfg Config, query string, jsonOut bool) error {
+	store, err := storage.OpenReadOnly(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	cols, rows, err := store.RawSQL(context.Background(), query)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		out := make([]map[string]any, 0, len(rows))
+		for _, row := range rows {
+			m := make(map[string]any, len(cols))
+			for i, c := range cols {
+				m[c] = row[i]
+			}
+			out = append(out, m)
+		}
+		return writeJSON(os.Stdout, out)
+	}
+	return printSQLTable(os.Stdout, cols, rows)
+}
+
+func runPrune(cfg Config, args []string) error {
+	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
+	olderThan := fs.String("older-than", "720h", "delete events older than this duration or absolute time")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	store, err := storage.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	cutoff, err := parseDurationOrTime(*olderThan, time.Now())
+	if err != nil {
+		return err
+	}
+	n, err := store.Prune(context.Background(), cutoff)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "pruned %d events older than %s\n", n, cutoff.Format(time.RFC3339))
 	return nil
 }
 
@@ -354,11 +667,52 @@ func printRootHelp(w io.Writer) {
 	fmt.Fprintln(w, "  start")
 	fmt.Fprintln(w, "  stop")
 	fmt.Fprintln(w, "  status")
-	fmt.Fprintln(w, "  timeline")
+	fmt.Fprintln(w, "  timeline   [--since] [--until] [--pid] [--uid] [--comm] [--category] [--action] [--path] [--exe] [--limit]")
 	fmt.Fprintln(w, "  diff")
-	fmt.Fprintln(w, "  query")
+	fmt.Fprintln(w, "  watch      [--interval] [--since] [--category] [--comm] [--pid]  (live tail)")
+	fmt.Fprintln(w, "  query      \"<plain English question>\" [--agent claude|codex|cursor|gemini|auto]  (env LTM_AGENT)")
+	fmt.Fprintln(w, "  query sql  [\"<SELECT ...>\"]  (run with no query to print the schema; ltm sql also works)")
+	fmt.Fprintln(w, "  prune      [--older-than]")
 	fmt.Fprintln(w, "  benchmark")
+	fmt.Fprintln(w, "  version")
 }
+
+func printVersion(w io.Writer, jsonOut bool) error {
+	info := map[string]string{
+		"version": Version,
+		"commit":  Commit,
+		"date":    Date,
+		"go":      runtime.Version(),
+		"os":      runtime.GOOS,
+		"arch":    runtime.GOARCH,
+	}
+	if jsonOut {
+		return writeJSON(w, info)
+	}
+	fmt.Fprintf(w, "ltm %s\n", Version)
+	fmt.Fprintf(w, "  commit:  %s\n", Commit)
+	fmt.Fprintf(w, "  built:   %s\n", Date)
+	fmt.Fprintf(w, "  go:      %s\n", runtime.Version())
+	fmt.Fprintf(w, "  platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	return nil
+}
+
+const sqlSchemaHelp = `ltm query sql - run read-only SQL against the events table.
+
+Usage:
+  ltm query sql "<SELECT ...>"
+  ltm query --json sql "<SELECT ...>"
+
+` + storage.SchemaDoc + `
+
+Examples:
+  ltm query sql "SELECT comm, count(*) n FROM events GROUP BY comm ORDER BY n DESC LIMIT 10"
+  ltm query sql "SELECT datetime(ts/1e9,'unixepoch') ts, path, comm FROM events WHERE category='file' AND action='write' AND path LIKE '/etc/%'"
+  ltm query sql "SELECT * FROM events WHERE pid = 1234 ORDER BY ts"
+  ltm query sql "SELECT comm, remote_addr, remote_port FROM events WHERE category='network' AND action='connect' AND ts > (unixepoch()-3600)*1000000000"
+
+The connection runs with PRAGMA query_only=ON: INSERT/UPDATE/DELETE/DDL will fail.
+`
 
 func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
@@ -390,31 +744,34 @@ func parseDurationOrTime(input string, now time.Time) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse time %q", input)
 }
 
+func formatEvent(ev storage.Event) string {
+	line := fmt.Sprintf("%s %-8s %-8s pid=%d ppid=%d uid=%d comm=%s",
+		ev.Timestamp.Format(time.RFC3339),
+		ev.Category,
+		ev.Action,
+		ev.PID,
+		ev.PPID,
+		ev.UID,
+		ev.Comm,
+	)
+	if ev.Path != "" {
+		line += " path=" + ev.Path
+	}
+	if ev.OldPath != "" {
+		line += " old_path=" + ev.OldPath
+	}
+	if ev.LocalPort != 0 {
+		line += fmt.Sprintf(" local=%s:%d", ev.LocalAddr, ev.LocalPort)
+	}
+	if ev.RemotePort != 0 {
+		line += fmt.Sprintf(" remote=%s:%d", ev.RemoteAddr, ev.RemotePort)
+	}
+	return line
+}
+
 func printEvents(w io.Writer, events []storage.Event) error {
 	for _, ev := range events {
-		line := fmt.Sprintf("%s %-8s %-8s pid=%d ppid=%d uid=%d comm=%s",
-			ev.Timestamp.Format(time.RFC3339),
-			ev.Category,
-			ev.Action,
-			ev.PID,
-			ev.PPID,
-			ev.UID,
-			ev.Comm,
-		)
-		if ev.Path != "" {
-			line += " path=" + ev.Path
-		}
-		if ev.OldPath != "" {
-			line += " old_path=" + ev.OldPath
-		}
-		if ev.LocalPort != 0 {
-			line += fmt.Sprintf(" local=%s:%d", ev.LocalAddr, ev.LocalPort)
-		}
-		if ev.RemotePort != 0 {
-			line += fmt.Sprintf(" remote=%s:%d", ev.RemoteAddr, ev.RemotePort)
-		}
-		line += "\n"
-		if _, err := io.WriteString(w, line); err != nil {
+		if _, err := io.WriteString(w, formatEvent(ev)+"\n"); err != nil {
 			return err
 		}
 	}
@@ -475,6 +832,30 @@ func printQueryResult(w io.Writer, result query.Result) error {
 		fmt.Fprintln(w, "- "+row)
 	}
 	return nil
+}
+
+func printSQLTable(w io.Writer, cols []string, rows [][]any) error {
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, strings.Join(cols, "\t"))
+	for _, row := range rows {
+		cells := make([]string, len(row))
+		for i, v := range row {
+			cells[i] = formatSQLValue(v)
+		}
+		fmt.Fprintln(tw, strings.Join(cells, "\t"))
+	}
+	return tw.Flush()
+}
+
+func formatSQLValue(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case []byte:
+		return string(t)
+	default:
+		return fmt.Sprintf("%v", t)
+	}
 }
 
 func readPIDFile(path string) (int, error) {

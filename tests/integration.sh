@@ -10,7 +10,7 @@ mkdir -p "${bin_dir}"
 
 go build -o "${bin_dir}/ltm" ./cmd/ltm
 
-db_path="${work_dir}/ltm.log"
+db_path="${work_dir}/ltm.db"
 pid_file="${work_dir}/ltm.pid"
 server_log="${work_dir}/server.log"
 socket_path="${work_dir}/http.sock"
@@ -36,8 +36,18 @@ wait "${server_pid}" 2>/dev/null || true
 
 sleep 2
 
+"${bin_dir}/ltm" version
+"${bin_dir}/ltm" --db "${db_path}" status
 "${bin_dir}/ltm" --db "${db_path}" timeline --since 10m
+"${bin_dir}/ltm" --db "${db_path}" timeline --since 10m --category network
+timeout 2 "${bin_dir}/ltm" --db "${db_path}" watch --since 10m --interval 500ms || true
 "${bin_dir}/ltm" --db "${db_path}" diff --from "10m" --to now
 "${bin_dir}/ltm" --db "${db_path}" query "what changed before nginx restarted?"
+"${bin_dir}/ltm" --db "${db_path}" query sql "SELECT category, count(*) FROM events GROUP BY category"
+
+fake_agent="${work_dir}/fake-agent"
+printf '#!/bin/sh\necho "SELECT category, count(*) AS n FROM events GROUP BY category ORDER BY n DESC"\n' > "${fake_agent}"
+chmod +x "${fake_agent}"
+LTM_AGENT="${fake_agent}" "${bin_dir}/ltm" --db "${db_path}" query "which categories are busiest?"
 
 "${bin_dir}/ltm" --pidfile "${pid_file}" stop

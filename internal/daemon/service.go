@@ -12,10 +12,10 @@ import (
 
 type Config struct {
 	Mode        string
-	IgnorePaths  []string
-	BufferSize   int
-	BatchSize    int
-	FlushPeriod  time.Duration
+	IgnorePaths []string
+	BufferSize  int
+	BatchSize   int
+	FlushPeriod time.Duration
 }
 
 type Service struct {
@@ -59,7 +59,7 @@ func (s *Service) Run(ctx context.Context) error {
 		errCh <- col.Run(ctx, sources, ingest)
 	}()
 	go func() {
-		errCh <- s.flushLoop(ctx, ingest)
+		errCh <- s.flushLoop(ctx, ingest, func() int64 { return col.Stats().DroppedEvents })
 	}()
 
 	select {
@@ -73,13 +73,24 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 }
 
-func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event) error {
+// flushLoop batches incoming events and writes them to the store. droppedFn
+// reports the collector's cumulative count of events dropped when the ingest
+// channel was full; the delta since the last flush is recorded on the batch so
+// gaps in the timeline stay visible instead of vanishing silently.
+func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event, droppedFn func() int64) error {
 	ticker := time.NewTicker(s.cfg.FlushPeriod)
 	defer ticker.Stop()
 	batch := make([]storage.Event, 0, s.cfg.BatchSize)
+	var lastDropped int64
 	flush := func() error {
 		if len(batch) == 0 {
 			return nil
+		}
+		if droppedFn != nil {
+			if cur := droppedFn(); cur > lastDropped {
+				batch[0].DroppedBefore += cur - lastDropped
+				lastDropped = cur
+			}
 		}
 		_, err := s.store.InsertEvents(ctx, batch)
 		batch = batch[:0]

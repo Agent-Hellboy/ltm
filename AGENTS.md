@@ -4,7 +4,7 @@ Contributor guide for `ltm` (Linux Time Machine).
 
 ## What this repo is
 
-`ltm` records machine history on Linux: process exec/exit, file open/write/rename/unlink, and network bind/connect events. Events flow through a narrow `storage.Event` contract, are appended to a local JSONL store, and are queried through CLI commands for timeline, diff, and natural-language-style questions.
+`ltm` records machine history on Linux: process exec/exit, file open/write/rename/unlink, and network bind/connect events. Events flow through a narrow `storage.Event` contract, are written to a local SQLite database, and are queried through CLI commands for timeline, diff, natural-language-style questions, and raw SQL.
 
 Two collector modes exist:
 
@@ -20,7 +20,8 @@ internal/
   daemon/             background service, batching, collector wiring
   collector/          ignore-path filtering, bounded buffering, source fan-in
   ebpf/               BPF C source, embedded object, Linux collector
-  storage/            append-only store, indexes, replay on open
+  storage/            SQLite-backed event store, filters, prune
+  agent/              external agent CLI bridge (NL question -> SQL)
   diff/               time-window machine-state diff
   query/              deterministic query templates over stored events
 tests/                integration script and small HTTP fixture
@@ -51,15 +52,15 @@ CI (`.github/workflows/ci.yml`) runs unit tests on Ubuntu and macOS, the integra
 Global flags must come **before** the subcommand:
 
 ```bash
-ltm --db /tmp/ltm.log --pidfile /tmp/ltm.pid start --mode ebpf
-ltm --db /tmp/ltm.log status
+ltm --db /tmp/ltm.db --pidfile /tmp/ltm.pid start --mode ebpf
+ltm --db /tmp/ltm.db status
 ```
 
 `start` re-execs the binary as `daemon --foreground` with global flags forwarded. Do not break that ordering when changing CLI code.
 
 Default paths:
 
-- DB: `~/.local/share/ltm/ltm.log`
+- DB: `~/.local/share/ltm/ltm.db`
 - PID: `~/.local/run/ltm.pid`
 
 ## Event contract
@@ -86,10 +87,21 @@ When extending the schema, bump `storage.SchemaVersion` only if replay or query 
 
 ## Storage rules
 
-- Store is append-only JSONL.
-- `Open()` replays the file into in-memory indexes (`load()` → `applyEventLocked()`).
-- Any fix to replay must keep timeline, diff, and query consistent after restart.
-- Add or extend tests in `internal/storage/store_test.go` for replay and query regressions.
+- Store is a SQLite database (`modernc.org/sqlite`, no CGo); the `events` table is the only source of truth, no in-memory event log.
+- `Open()` is the single writer (WAL mode, `SetMaxOpenConns(1)`); `OpenReadOnly()` is for every read path and runs with `PRAGMA query_only=ON` so it can never write, including via `ltm sql`.
+- `OpenReadOnly()` errors if the DB file does not exist yet — do not silently create one on a read path.
+- `storage.Filter` is the structured query surface (time range, pid/uid/comm/category/action, path/exe LIKE patterns); extend it rather than adding more one-off `EventsByX` methods.
+- Add or extend tests in `internal/storage/store_test.go` for `Filter` combinations, read-only write-rejection, and prune behavior.
+- `storage.SchemaDoc` is shown to users (`ltm query sql` with no args) and embedded in agent prompts — update it whenever the `events` schema changes.
+- `Event.DroppedBefore` counts events lost immediately before a given row (kernel perf-buffer loss and collector channel overflow, attributed in `daemon.flushLoop`). Totals are `SUM(dropped_before)`, so keep it additive — never overwrite the running total.
+- `ltm watch` tails via `EventsAfterID`/`LatestEventID` on the read-only store; keep those id-ordered and cheap.
+
+## Agent bridge rules
+
+- `internal/agent` shells out to a configured agent CLI (`claude`, `codex`, `cursor`, `gemini`, `auto`, or a custom command via `--agent` / `LTM_AGENT`) to turn a plain English `ltm query` into SQL.
+- Agent-generated SQL must only ever run through `OpenReadOnly` + `RawSQL`; `ExtractSQL` additionally rejects non-SELECT and multi-statement output. Keep both layers.
+- Agent failure must never break `ltm query`: warn on stderr and fall back to the deterministic templates in `internal/query`.
+- Tests use fake agent shell scripts (see `internal/agent/agent_test.go`); never call a real agent CLI from unit tests.
 
 ## Code style
 
@@ -117,8 +129,12 @@ Demo flow:
 ./bin/ltm start --mode demo
 ./bin/ltm status
 ./bin/ltm timeline --since 10m
+./bin/ltm timeline --since 10m --category network
+./bin/ltm watch --interval 1s
 ./bin/ltm diff --from 10m --to now
 ./bin/ltm query "who modified /tmp/ltm-demo.txt?"
+./bin/ltm query sql "SELECT category, count(*) FROM events GROUP BY category"
+./bin/ltm version
 ./bin/ltm stop
 ```
 
