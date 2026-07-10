@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"ltm/internal/collector"
@@ -11,7 +10,6 @@ import (
 )
 
 type Config struct {
-	Mode        string
 	IgnorePaths []string
 	BufferSize  int
 	BatchSize   int
@@ -33,9 +31,6 @@ func NewService(store *storage.Store, cfg Config) *Service {
 	if cfg.FlushPeriod <= 0 {
 		cfg.FlushPeriod = 1 * time.Second
 	}
-	if cfg.Mode == "" {
-		cfg.Mode = "demo"
-	}
 	return &Service{store: store, cfg: cfg}
 }
 
@@ -49,10 +44,7 @@ func (s *Service) Run(ctx context.Context) error {
 		BufferSize:  s.cfg.BufferSize / 2,
 	})
 
-	sources := []ebpf.Source{demoSource{interval: 500 * time.Millisecond}}
-	if s.cfg.Mode == "ebpf" {
-		sources = []ebpf.Source{ebpf.RealCollector{}}
-	}
+	sources := []ebpf.Source{ebpf.RealCollector{}}
 
 	errCh := make(chan error, 2)
 	go func() {
@@ -117,38 +109,4 @@ func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event, dr
 			}
 		}
 	}
-}
-
-type demoSource struct {
-	interval time.Duration
-}
-
-func (d demoSource) Name() string { return "demo" }
-
-func (d demoSource) Run(ctx context.Context, out chan<- storage.Event) error {
-	if d.interval <= 0 {
-		d.interval = 500 * time.Millisecond
-	}
-	events := storage.GenerateDemoEvents(time.Now(), 60)
-	ticker := time.NewTicker(d.interval)
-	defer ticker.Stop()
-	i := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			ev := events[i%len(events)]
-			ev.Timestamp = time.Now()
-			select {
-			case out <- ev:
-			default:
-			}
-			i++
-		}
-	}
-}
-
-func (s *Service) String() string {
-	return fmt.Sprintf("mode=%s", s.cfg.Mode)
 }

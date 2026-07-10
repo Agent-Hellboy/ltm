@@ -1,11 +1,10 @@
 # ltm
 
-`ltm` is a machine-history debugger for Linux. It records process, file, and network metadata through a real eBPF collector (syscall tracepoints) or a demo mode for local development without kernel privileges.
+`ltm` is a machine-history debugger for Linux. It records process, file, and network metadata through a real eBPF collector (syscall tracepoints).
 
 ## What works now
 
-- `ltm start --mode demo` — synthetic events for development and CI
-- `ltm start --mode ebpf` — real syscall tracepoint collection on Linux
+- `ltm start` — begin recording via eBPF syscall tracepoints (needs root; Linux only)
 - `ltm stop`
 - `ltm status`
 - `ltm timeline --since 1h [--pid] [--uid] [--comm] [--category] [--action] [--path] [--exe] [--until] [--limit]`
@@ -30,29 +29,22 @@ On Linux, rebuild the embedded BPF object after changing `internal/ebpf/collecto
 make ebpf
 ```
 
-## Demo flow
+## Usage (Linux, root)
 
 ```bash
-./bin/ltm start --mode demo
+sudo ./bin/ltm start                 # begin recording (eBPF)
 ./bin/ltm status
-./bin/ltm timeline --since 1h
-./bin/ltm watch --interval 1s          # live tail; Ctrl-C to stop
-./bin/ltm diff --from "2026-07-08 14:00" --to now
-./bin/ltm query "who modified /tmp/ltm-demo.txt?"
-./bin/ltm stop
-```
-
-## eBPF flow (Linux, root)
-
-```bash
-sudo ./bin/ltm start --mode ebpf
-./bin/ltm status
-echo test >> /tmp/ltm-demo.txt
-./bin/ltm query "who modified /tmp/ltm-demo.txt?"
+echo test >> /etc/some.conf          # do things on the machine
+./bin/ltm timeline --since 5m
+./bin/ltm watch --interval 1s        # live tail; Ctrl-C to stop
+./bin/ltm diff --from 10m --to now
+./bin/ltm query "who modified /etc/some.conf?"
 sudo ./bin/ltm stop
 ```
 
-## eBPF coverage (`--mode ebpf`)
+Recording requires root (or `CAP_BPF` + `CAP_PERFMON`); the read/query commands do not. Use `ltm benchmark` to populate a database with synthetic events without recording.
+
+## eBPF coverage
 
 The Linux collector attaches ~60 tracepoints across:
 
@@ -117,12 +109,11 @@ docs/             architecture and security notes
 
 ## Security
 
-- Demo mode does not require kernel privileges.
-- eBPF mode requires root or `CAP_BPF`, `CAP_PERFMON`, and often `CAP_SYS_ADMIN` depending on kernel and distro policy.
+- Recording requires root or `CAP_BPF`, `CAP_PERFMON`, and often `CAP_SYS_ADMIN` depending on kernel and distro policy.
 - The recorder stores metadata only.
 - No file contents are captured.
 - Ignore rules include `/proc`, `/sys`, `/dev`, browser cache directories, and package cache directories.
 
 ## Integration
 
-`tests/integration.sh` exercises the CLI and demo daemon flow. CI runs unit tests on Ubuntu and macOS, plus the integration script on Ubuntu.
+`tests/integration.sh` records real activity with the eBPF collector and exercises the query surface end to end; it needs a Linux host with root. CI runs unit tests on Ubuntu and macOS, plus the integration script on Ubuntu.

@@ -6,10 +6,7 @@ Contributor guide for `ltm` (Linux Time Machine).
 
 `ltm` records machine history on Linux: process exec/exit, file open/write/rename/unlink, and network bind/connect events. Events flow through a narrow `storage.Event` contract, are written to a local SQLite database, and are queried through CLI commands for timeline, diff, natural-language-style questions, and raw SQL.
 
-Two collector modes exist:
-
-- `demo` — synthetic events for development and CI; no kernel privileges.
-- `ebpf` — real syscall tracepoints on Linux; requires root or BPF capabilities.
+The collector is eBPF syscall tracepoints on Linux; `ltm start` requires root or BPF capabilities. There is no demo/simulated collector — use `ltm benchmark` to populate a database with synthetic events for development and CI without recording.
 
 ## Repository layout
 
@@ -35,7 +32,7 @@ Only `cmd/` is public import surface. All implementation packages live under `in
 ```bash
 go test ./...
 go build -o bin/ltm ./cmd/ltm
-make integration   # demo daemon end-to-end flow
+make integration   # records real activity via eBPF; needs a Linux host with root
 ```
 
 On Linux, after changing `internal/ebpf/collector.bpf.c`:
@@ -52,7 +49,7 @@ CI (`.github/workflows/ci.yml`) runs unit tests on Ubuntu and macOS, the integra
 Global flags must come **before** the subcommand:
 
 ```bash
-ltm --db /tmp/ltm.db --pidfile /tmp/ltm.pid start --mode ebpf
+sudo ltm --db /tmp/ltm.db --pidfile /tmp/ltm.pid start
 ltm --db /tmp/ltm.db status
 ```
 
@@ -123,29 +120,23 @@ When extending the schema, bump `storage.SchemaVersion` only if replay or query 
 
 ## Manual verification
 
-Demo flow:
+Recording flow (Linux host, root):
 
 ```bash
-./bin/ltm start --mode demo
+sudo ./bin/ltm start
 ./bin/ltm status
+echo test >> /tmp/probe.txt
 ./bin/ltm timeline --since 10m
 ./bin/ltm timeline --since 10m --category network
 ./bin/ltm watch --interval 1s
 ./bin/ltm diff --from 10m --to now
-./bin/ltm query "who modified /tmp/ltm-demo.txt?"
+./bin/ltm query "who modified /tmp/probe.txt?"
 ./bin/ltm query sql "SELECT category, count(*) FROM events GROUP BY category"
 ./bin/ltm version
-./bin/ltm stop
-```
-
-eBPF flow (Linux host):
-
-```bash
-sudo ./bin/ltm start --mode ebpf
-echo test >> /tmp/ltm-demo.txt
-./bin/ltm query "who modified /tmp/ltm-demo.txt?"
 sudo ./bin/ltm stop
 ```
+
+Query-only flow without recording (any OS): seed with `./bin/ltm benchmark --count 500`, then run the `timeline`/`diff`/`query`/`query sql` commands against the database.
 
 ## Related docs
 

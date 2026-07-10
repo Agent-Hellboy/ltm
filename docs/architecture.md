@@ -12,15 +12,18 @@ The MVP is intentionally split around a narrow event contract.
 
 ## Phase 1
 
-- Demo collector
-- Append-only local store
+- Local event store
 - Deterministic diff and query engines
 - CLI end to end
 
 ## Phase 2
 
-- Real eBPF syscall tracepoint collector on Linux (`--mode ebpf`)
+- Real eBPF syscall tracepoint collector on Linux (the only collector)
 - Broad syscall coverage: process, file, memory, network, and block I/O tracepoints
 - Embedded BPF object in `internal/ebpf/collector_bpfel.o`
-- Same event schema and storage pipeline
+
+## Current
+
+- SQLite-backed store queried read-only; structured filters, raw SQL, and agent-assisted natural-language queries
+- The earlier demo/synthetic collector has been removed; `ltm benchmark` seeds synthetic events for testing without recording
 

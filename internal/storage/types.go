@@ -110,11 +110,6 @@ type InsertStats struct {
 	WriteLatency time.Duration
 }
 
-type DemoSpec struct {
-	Start time.Time
-	Count int
-}
-
 // Filter expresses a logical-AND set of predicates over the event log so
 // callers can query by any combination of time, pid, path, process, etc.
 // without hand-writing SQL.

@@ -1,15 +1,15 @@
 # Security
 
-## Current MVP
+## Recording
 
-- Demo mode does not need elevated privileges.
+- Recording (`ltm start`) runs the eBPF collector and requires root or sufficient BPF/perf capabilities (`CAP_BPF`, `CAP_PERFMON`).
+- The read/query commands do not need privileges; they open the database read-only.
 - The store captures metadata only.
 - File contents are not recorded.
 - Ignored paths include system pseudo-filesystems and common cache directories.
 
-## Future eBPF mode
+## Kernel side
 
-- Expected to run as root or with sufficient BPF/perf capabilities.
-- The kernel-side program should remain minimal.
+- The kernel-side program stays minimal.
 - Userspace is responsible for filtering, enrichment, batching, and storage.
 

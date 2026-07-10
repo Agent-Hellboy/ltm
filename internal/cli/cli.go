@@ -35,7 +35,6 @@ var (
 type Config struct {
 	DBPath      string
 	PIDFile     string
-	Mode        string
 	JSON        bool
 	IgnorePaths []string
 }
@@ -48,7 +47,6 @@ func defaultConfig() Config {
 	return Config{
 		DBPath:  filepath.Join(home, ".local", "share", "ltm", "ltm.db"),
 		PIDFile: filepath.Join(home, ".local", "run", "ltm.pid"),
-		Mode:    "demo",
 		IgnorePaths: []string{
 			"/proc",
 			"/sys",
@@ -159,11 +157,9 @@ func (m *multiIntFlag) Set(v string) error {
 
 func runStart(cfg Config, args []string) error {
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	mode := fs.String("mode", "demo", "collector mode: demo or ebpf")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg.Mode = *mode
 	if err := os.MkdirAll(filepath.Dir(cfg.PIDFile), 0o755); err != nil {
 		return err
 	}
@@ -174,7 +170,7 @@ func runStart(cfg Config, args []string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, "--db", cfg.DBPath, "--pidfile", cfg.PIDFile, "daemon", "--foreground", "--mode", cfg.Mode)
+	cmd := exec.Command(exe, "--db", cfg.DBPath, "--pidfile", cfg.PIDFile, "daemon", "--foreground")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -185,7 +181,7 @@ func runStart(cfg Config, args []string) error {
 		_ = cmd.Process.Kill()
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "ltm started pid=%d mode=%s db=%s\n", cmd.Process.Pid, cfg.Mode, cfg.DBPath)
+	fmt.Fprintf(os.Stdout, "ltm started pid=%d db=%s\n", cmd.Process.Pid, cfg.DBPath)
 	return nil
 }
 
@@ -531,7 +527,7 @@ func runAgentQuery(cfg Config, a *agent.Agent, question string, jsonOut bool) er
 
 func runBenchmark(cfg Config, args []string) error {
 	fs := flag.NewFlagSet("benchmark", flag.ContinueOnError)
-	count := fs.Int("count", 1000, "number of demo events")
+	count := fs.Int("count", 1000, "number of synthetic events")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -617,7 +613,6 @@ func runPrune(cfg Config, args []string) error {
 func runDaemon(cfg Config, args []string) error {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	foreground := fs.Bool("foreground", false, "run in foreground")
-	mode := fs.String("mode", cfg.Mode, "collector mode")
 	dbPath := fs.String("db", cfg.DBPath, "storage path")
 	pidFile := fs.String("pidfile", cfg.PIDFile, "pid file path")
 	if err := fs.Parse(args); err != nil {
@@ -626,7 +621,6 @@ func runDaemon(cfg Config, args []string) error {
 	if !*foreground {
 		return errors.New("daemon requires --foreground")
 	}
-	cfg.Mode = *mode
 	cfg.DBPath = *dbPath
 	cfg.PIDFile = *pidFile
 	store, err := storage.Open(cfg.DBPath)
@@ -635,7 +629,6 @@ func runDaemon(cfg Config, args []string) error {
 	}
 	defer store.Close()
 	svc := daemon.NewService(store, daemon.Config{
-		Mode:        cfg.Mode,
 		IgnorePaths: cfg.IgnorePaths,
 	})
 	ctx, cancel := signalContext()
@@ -664,7 +657,7 @@ func printRootHelp(w io.Writer) {
 	fmt.Fprintln(w, "  ltm [global flags] <command> [command flags]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Commands:")
-	fmt.Fprintln(w, "  start")
+	fmt.Fprintln(w, "  start      begin recording (eBPF; requires root)")
 	fmt.Fprintln(w, "  stop")
 	fmt.Fprintln(w, "  status")
 	fmt.Fprintln(w, "  timeline   [--since] [--until] [--pid] [--uid] [--comm] [--category] [--action] [--path] [--exe] [--limit]")

@@ -1,53 +1,63 @@
 #!/usr/bin/env bash
+# End-to-end smoke test: record real activity with the eBPF collector, then
+# exercise the query surface. Requires a Linux host with root (sudo) and a
+# kernel that supports tracepoint BPF programs.
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work_dir="$(mktemp -d)"
-bin_dir="${work_dir}/bin"
-trap 'rm -rf "${work_dir}"' EXIT
+trap 'sudo rm -rf "${work_dir}"' EXIT
 
-mkdir -p "${bin_dir}"
-
-go build -o "${bin_dir}/ltm" ./cmd/ltm
-
-db_path="${work_dir}/ltm.db"
+ltm="${work_dir}/ltm"
+db="${work_dir}/ltm.db"
 pid_file="${work_dir}/ltm.pid"
-server_log="${work_dir}/server.log"
-socket_path="${work_dir}/http.sock"
 
-"${bin_dir}/ltm" --db "${db_path}" --pidfile "${pid_file}" start --mode demo
-sleep 2
+go build -o "${ltm}" ./cmd/ltm
 
-demo_file="${work_dir}/demo.txt"
-echo "hello" > "${demo_file}"
-echo "world" >> "${demo_file}"
+"${ltm}" version
 
-LTM_HTTP_SOCKET="${socket_path}" go run ./tests/httpserver >"${server_log}" 2>&1 &
-server_pid=$!
-for _ in $(seq 1 20); do
-  if curl -fsS --unix-socket "${socket_path}" http://localhost/ >/dev/null 2>/dev/null; then
-    break
-  fi
-  sleep 1
-done
-curl -fsS --unix-socket "${socket_path}" http://localhost/ >/dev/null
-kill "${server_pid}"
-wait "${server_pid}" 2>/dev/null || true
+# Start recording (eBPF; needs root). start forks the daemon and writes the
+# pidfile; the daemon's attach summary prints to this script's output.
+sudo "${ltm}" --db "${db}" --pidfile "${pid_file}" start
+sleep 3
+if ! sudo "${ltm}" --db "${db}" --pidfile "${pid_file}" status | grep -q "alive=true"; then
+  echo "daemon failed to start (eBPF unsupported on this host?)" >&2
+  exit 1
+fi
 
-sleep 2
+# Generate real, identifiable activity.
+mark="ltm-ci-$$"
+echo "config change" >"/tmp/${mark}.conf"
+cat "/tmp/${mark}.conf" >/dev/null
+mv "/tmp/${mark}.conf" "/tmp/${mark}.renamed.conf"
+rm -f "/tmp/${mark}.renamed.conf"
+id >/dev/null
+getent hosts one.one.one.one >/dev/null 2>&1 || true
+sleep 3
 
-"${bin_dir}/ltm" version
-"${bin_dir}/ltm" --db "${db_path}" status
-"${bin_dir}/ltm" --db "${db_path}" timeline --since 10m
-"${bin_dir}/ltm" --db "${db_path}" timeline --since 10m --category network
-timeout 2 "${bin_dir}/ltm" --db "${db_path}" watch --since 10m --interval 500ms || true
-"${bin_dir}/ltm" --db "${db_path}" diff --from "10m" --to now
-"${bin_dir}/ltm" --db "${db_path}" query "what changed before nginx restarted?"
-"${bin_dir}/ltm" --db "${db_path}" query sql "SELECT category, count(*) FROM events GROUP BY category"
+sudo "${ltm}" --pidfile "${pid_file}" stop
+sleep 1
 
-fake_agent="${work_dir}/fake-agent"
-printf '#!/bin/sh\necho "SELECT category, count(*) AS n FROM events GROUP BY category ORDER BY n DESC"\n' > "${fake_agent}"
-chmod +x "${fake_agent}"
-LTM_AGENT="${fake_agent}" "${bin_dir}/ltm" --db "${db_path}" query "which categories are busiest?"
+# Everything below reads the root-owned DB, so run as root too.
+sudo "${ltm}" --db "${db}" status
 
-"${bin_dir}/ltm" --pidfile "${pid_file}" stop
+count="$(sudo "${ltm}" --db "${db}" query sql "SELECT count(*) FROM events" | tail -1)"
+echo "captured ${count} events"
+if [ "${count}" -le 0 ]; then
+  echo "no events captured" >&2
+  exit 1
+fi
+
+sudo "${ltm}" --db "${db}" query sql "SELECT category, count(*) n FROM events GROUP BY category ORDER BY n DESC"
+sudo "${ltm}" --db "${db}" timeline --since 5m --category process --limit 5
+sudo "${ltm}" --db "${db}" diff --from 5m --to now >"${work_dir}/diff.out"
+head -2 "${work_dir}/diff.out"
+sudo "${ltm}" --db "${db}" query "who modified /tmp/${mark}.renamed.conf?"
+
+# Read-only guard: raw SQL writes must be rejected.
+if sudo "${ltm}" --db "${db}" query sql "DELETE FROM events" 2>/dev/null; then
+  echo "read-only guard failed: DELETE succeeded" >&2
+  exit 1
+fi
+
+echo "integration OK"
