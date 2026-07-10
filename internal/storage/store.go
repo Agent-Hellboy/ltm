@@ -262,11 +262,6 @@ func (s *Store) EventsAfterID(ctx context.Context, afterID int64, limit int) ([]
 		`SELECT `+eventColumns+` FROM events WHERE id > ? ORDER BY id ASC LIMIT ?`, afterID, limit)
 }
 
-// EventsSince returns events timestamped after `since`, oldest first.
-func (s *Store) EventsSince(ctx context.Context, since time.Time, limit int) ([]Event, error) {
-	return s.EventsBetween(ctx, since, time.Now(), limit)
-}
-
 // EventsBetween returns events in [from, to], oldest first.
 func (s *Store) EventsBetween(ctx context.Context, from, to time.Time, limit int) ([]Event, error) {
 	if limit <= 0 {
@@ -294,10 +289,6 @@ func (s *Store) EventsByPath(ctx context.Context, path string, limit int) ([]Eve
 	return s.queryEvents(ctx,
 		`SELECT `+eventColumns+` FROM events WHERE path = ? OR old_path = ? ORDER BY ts ASC, id ASC LIMIT ?`,
 		path, path, limit)
-}
-
-func (s *Store) PathEvents(ctx context.Context, path string, limit int) ([]Event, error) {
-	return s.EventsByPath(ctx, path, limit)
 }
 
 // Query runs an arbitrary logical-AND Filter over the event log, newest first.
@@ -410,112 +401,6 @@ func normalizeTerms(terms []string) []string {
 	return out
 }
 
-// Processes reconstructs a start/exit merged view per pid from the raw event
-// log, most recent pid first.
-func (s *Store) Processes(ctx context.Context, limit int) ([]Process, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	starts := make(map[int]Process)
-	startRows, err := s.db.QueryContext(ctx, `
-		SELECT e.pid, e.ppid, e.uid, e.comm, e.exe, e.ts, e.container_id, e.cgroup_path
-		FROM events e
-		JOIN (SELECT pid, MIN(ts) AS mn FROM events WHERE category = 'process' AND action IN ('exec','fork','clone') GROUP BY pid) f
-		ON e.pid = f.pid AND e.ts = f.mn AND e.category = 'process' AND e.action IN ('exec','fork','clone')`)
-	if err != nil {
-		return nil, err
-	}
-	for startRows.Next() {
-		var p Process
-		var ts int64
-		if err := startRows.Scan(&p.PID, &p.PPID, &p.UID, &p.Comm, &p.Exe, &ts, &p.ContainerID, &p.CgroupPath); err != nil {
-			startRows.Close()
-			return nil, err
-		}
-		p.StartTime = time.Unix(0, ts).UTC()
-		starts[p.PID] = p
-	}
-	if err := startRows.Err(); err != nil {
-		startRows.Close()
-		return nil, err
-	}
-	startRows.Close()
-
-	exitRows, err := s.db.QueryContext(ctx, `
-		SELECT e.pid, e.ppid, e.uid, e.comm, e.exe, e.ts, e.exit_code
-		FROM events e
-		JOIN (SELECT pid, MAX(ts) AS mx FROM events WHERE category = 'process' AND action = 'exit' GROUP BY pid) l
-		ON e.pid = l.pid AND e.ts = l.mx AND e.category = 'process' AND e.action = 'exit'`)
-	if err != nil {
-		return nil, err
-	}
-	defer exitRows.Close()
-	for exitRows.Next() {
-		var pid, ppid, uid, exitCode int
-		var comm, exe string
-		var ts int64
-		if err := exitRows.Scan(&pid, &ppid, &uid, &comm, &exe, &ts, &exitCode); err != nil {
-			return nil, err
-		}
-		p, ok := starts[pid]
-		if !ok {
-			p = Process{PID: pid}
-		}
-		p.PPID = ppid
-		p.UID = uid
-		p.Comm = comm
-		p.Exe = exe
-		p.EndTime = time.Unix(0, ts).UTC()
-		p.ExitCode = exitCode
-		starts[pid] = p
-	}
-	if err := exitRows.Err(); err != nil {
-		return nil, err
-	}
-
-	pids := make([]int, 0, len(starts))
-	for pid := range starts {
-		pids = append(pids, pid)
-	}
-	sortIntsDesc(pids)
-	if len(pids) > limit {
-		pids = pids[:limit]
-	}
-	out := make([]Process, 0, len(pids))
-	for _, pid := range pids {
-		out = append(out, starts[pid])
-	}
-	return out, nil
-}
-
-// Files returns the most recent event per path, sorted by path descending.
-func (s *Store) Files(ctx context.Context, limit int) ([]FileRecord, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT e.path, e.action, e.pid, e.comm, e.ts
-		FROM events e
-		JOIN (SELECT path, MAX(ts) AS mx FROM events WHERE category = 'file' AND path != '' GROUP BY path) m
-		ON e.path = m.path AND e.ts = m.mx AND e.category = 'file'
-		ORDER BY e.path DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []FileRecord
-	for rows.Next() {
-		var fr FileRecord
-		var ts int64
-		if err := rows.Scan(&fr.Path, &fr.LastAction, &fr.LastPID, &fr.LastComm, &ts); err != nil {
-			return nil, err
-		}
-		fr.LastSeenAt = time.Unix(0, ts).UTC()
-		out = append(out, fr)
-	}
-	return out, rows.Err()
-}
-
 // Sockets returns network events with an address set, newest first.
 func (s *Store) Sockets(ctx context.Context, limit int) ([]SocketRecord, error) {
 	if limit <= 0 {
@@ -592,14 +477,6 @@ func (s *Store) RawSQL(ctx context.Context, query string) ([]string, [][]any, er
 		out = append(out, vals)
 	}
 	return cols, out, rows.Err()
-}
-
-func sortIntsDesc(v []int) {
-	for i := 1; i < len(v); i++ {
-		for j := i; j > 0 && v[j-1] < v[j]; j-- {
-			v[j-1], v[j] = v[j], v[j-1]
-		}
-	}
 }
 
 func GenerateDemoEvents(start time.Time, count int) []Event {

@@ -58,27 +58,6 @@ type Event struct {
 	Raw           json.RawMessage `json:"raw,omitempty"`
 }
 
-type Process struct {
-	PID         int       `json:"pid"`
-	PPID        int       `json:"ppid"`
-	UID         int       `json:"uid"`
-	Comm        string    `json:"comm"`
-	Exe         string    `json:"exe,omitempty"`
-	StartTime   time.Time `json:"start_time"`
-	EndTime     time.Time `json:"end_time,omitempty"`
-	ExitCode    int       `json:"exit_code,omitempty"`
-	ContainerID string    `json:"container_id,omitempty"`
-	CgroupPath  string    `json:"cgroup_path,omitempty"`
-}
-
-type FileRecord struct {
-	Path       string    `json:"path"`
-	LastAction string    `json:"last_action"`
-	LastPID    int       `json:"last_pid"`
-	LastComm   string    `json:"last_comm"`
-	LastSeenAt time.Time `json:"last_seen_at"`
-}
-
 type SocketRecord struct {
 	PID        int       `json:"pid"`
 	Comm       string    `json:"comm"`
@@ -88,13 +67,6 @@ type SocketRecord struct {
 	RemotePort int       `json:"remote_port,omitempty"`
 	State      string    `json:"state"`
 	SeenAt     time.Time `json:"seen_at"`
-}
-
-type Snapshot struct {
-	ID        int64     `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	Label     string    `json:"label"`
-	Summary   string    `json:"summary"`
 }
 
 type Status struct {

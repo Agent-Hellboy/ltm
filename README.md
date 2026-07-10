@@ -23,7 +23,7 @@ Recording needs root (or `CAP_BPF` + `CAP_PERFMON`); querying doesn't. No live h
 |---|---|
 | `start` / `stop` / `status` | control and inspect the recorder |
 | `timeline` | filter events by `--pid --uid --comm --category --action --path --exe --since --until --limit` (repeatable; `--path`/`--exe` take SQL `LIKE`) |
-| `watch` | live tail of new events (same filters, `--interval`) |
+| `watch` | live tail of new events (`--interval --since --category --comm --pid`) |
 | `diff --from --to` | machine-state changes between two times |
 | `query "<question>"` | plain-English query (see below) |
 | `query sql "<SELECT>"` | arbitrary read-only SQL; no arg prints the schema (`ltm sql` for short) |
@@ -50,6 +50,13 @@ The generated SQL is printed before it runs, executes on the read-only connectio
 ~60 tracepoints across **process** (exec, exit, fork, clone, kill), **file** (open/close, read/write, rename, unlink, link, symlink, mkdir, rmdir, chmod, chown, stat, access, truncate, dup, pipe, …), **memory** (mmap, munmap, mprotect), **network** (socket, connect, bind, listen, accept, send/recv, shutdown), and **block** (`block_rq_issue`). BPF-side filters skip `/proc`, `/sys`, `/dev` and the daemon's own PID. See `internal/ebpf/tracepoints_linux.go` for the full list; rebuild the embedded object with `make ebpf` after editing `collector.bpf.c`.
 
 The recorder stores metadata only — no file contents.
+
+### Known limitations
+
+- **x86_64 only** for recording — the BPF program is built `-D__TARGET_ARCH_x86` (see issue #2). Query features work anywhere.
+- **IPv4 only** — AF_INET6 connects/binds are recorded as events but without the address decoded.
+- **Read/write byte counts** are the syscall's *requested* size (read at `sys_enter`), so short/failed I/O over-counts; `readv`/`writev`/`sendmsg`/`recvmsg` report `0` bytes.
+- **fd→path resolution** covers fds ≤ 1024 and can misattribute after heavy PID reuse; events for higher fds are recorded without a path.
 
 ## Development
 

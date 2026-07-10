@@ -85,5 +85,57 @@ func TestQueryEngine(t *testing.T) {
 	if len(res.Rows) == 0 {
 		t.Fatalf("expected pid rows")
 	}
+
+	// Connection query by IP must find the curl -> 127.0.0.1 event.
+	res, err = engine.Execute(context.Background(), "who connected to 127.0.0.1?")
+	if err != nil {
+		t.Fatalf("execute connected-to: %v", err)
+	}
+	if len(res.Rows) == 0 || !strings.Contains(res.Rows[0], "curl") {
+		t.Fatalf("expected curl connection to 127.0.0.1, got: %+v", res.Rows)
+	}
 }
 
+func TestQueryRestartAndConnection(t *testing.T) {
+	t.Parallel()
+	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
+	events := []storage.Event{
+		{Timestamp: base, Category: "process", Action: "exit", PID: 10, Comm: "nginx"},
+		{Timestamp: base.Add(time.Second), Category: "process", Action: "exec", PID: 11, Comm: "nginx", Exe: "/usr/sbin/nginx"},
+		{Timestamp: base.Add(2 * time.Second), Category: "process", Action: "exec", PID: 12, Comm: "redis", Exe: "/usr/bin/redis"},
+		{Timestamp: base.Add(3 * time.Second), Category: "network", Action: "connect", PID: 13, Comm: "curl", RemoteAddr: "93.184.216.34", RemotePort: 80, RemoteHost: "example.com"},
+	}
+	if _, err := store.InsertEvents(context.Background(), events); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+	engine := NewEngine(store)
+
+	// Restart query narrowed to nginx must return only nginx process events.
+	res, err := engine.Execute(context.Background(), "what changed before nginx restarted?")
+	if err != nil {
+		t.Fatalf("restart query: %v", err)
+	}
+	if len(res.Rows) == 0 {
+		t.Fatalf("restart query returned no rows (regression: question words fed as filters)")
+	}
+	for _, row := range res.Rows {
+		if !strings.Contains(row, "nginx") {
+			t.Fatalf("restart query leaked non-nginx row: %q", row)
+		}
+	}
+
+	// Connection query by hostname must match on remote_host.
+	res, err = engine.Execute(context.Background(), "who connected to example.com?")
+	if err != nil {
+		t.Fatalf("connection-by-host query: %v", err)
+	}
+	if len(res.Rows) != 1 || !strings.Contains(res.Rows[0], "curl") {
+		t.Fatalf("expected single curl connection to example.com, got: %+v", res.Rows)
+	}
+}

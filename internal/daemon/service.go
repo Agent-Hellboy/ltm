@@ -46,23 +46,29 @@ func (s *Service) Run(ctx context.Context) error {
 
 	sources := []ebpf.Source{ebpf.RealCollector{}}
 
-	errCh := make(chan error, 2)
+	colErr := make(chan error, 1)
 	go func() {
-		errCh <- col.Run(ctx, sources, ingest)
+		colErr <- col.Run(ctx, sources, ingest)
 	}()
+	flushErr := make(chan error, 1)
 	go func() {
-		errCh <- s.flushLoop(ctx, ingest, func() int64 { return col.Stats().DroppedEvents })
+		flushErr <- s.flushLoop(ctx, ingest, func() int64 { return col.Stats().DroppedEvents })
 	}()
 
+	var runErr error
 	select {
 	case <-ctx.Done():
-		return nil
-	case err := <-errCh:
-		if err != nil {
-			return err
-		}
-		return nil
+	case runErr = <-colErr:
 	}
+	// Stop the collector and flush loop, then wait for the flush loop to drain
+	// and persist its final batch before returning. The caller closes the store
+	// right after Run returns, so returning early would drop buffered events and
+	// race the writer against Store.Close.
+	cancel()
+	if ferr := <-flushErr; ferr != nil && runErr == nil {
+		runErr = ferr
+	}
+	return runErr
 }
 
 // flushLoop batches incoming events and writes them to the store. droppedFn
@@ -74,7 +80,7 @@ func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event, dr
 	defer ticker.Stop()
 	batch := make([]storage.Event, 0, s.cfg.BatchSize)
 	var lastDropped int64
-	flush := func() error {
+	flush := func(fctx context.Context) error {
 		if len(batch) == 0 {
 			return nil
 		}
@@ -84,27 +90,43 @@ func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event, dr
 				lastDropped = cur
 			}
 		}
-		_, err := s.store.InsertEvents(ctx, batch)
+		_, err := s.store.InsertEvents(fctx, batch)
 		batch = batch[:0]
 		return err
 	}
 	for {
 		select {
 		case <-ctx.Done():
-			return flush()
+			// Drain anything still buffered, then persist with a fresh context
+			// so the cancelled ctx doesn't abort the final write.
+			for drained := false; !drained; {
+				select {
+				case ev, ok := <-ingest:
+					if !ok {
+						drained = true
+					} else {
+						batch = append(batch, ev)
+					}
+				default:
+					drained = true
+				}
+			}
+			fctx, fcancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer fcancel()
+			return flush(fctx)
 		case ev, ok := <-ingest:
 			if !ok {
-				return flush()
+				return flush(ctx)
 			}
 			ev.SchemaVersion = storage.SchemaVersion
 			batch = append(batch, ev)
 			if len(batch) >= s.cfg.BatchSize {
-				if err := flush(); err != nil {
+				if err := flush(ctx); err != nil {
 					return err
 				}
 			}
 		case <-ticker.C:
-			if err := flush(); err != nil {
+			if err := flush(ctx); err != nil {
 				return err
 			}
 		}

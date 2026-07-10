@@ -62,6 +62,11 @@ func TestExtractSQL(t *testing.T) {
 			in:      "SELECT 1; DROP TABLE events",
 			wantErr: true,
 		},
+		{
+			name:    "mutating verb hidden in WITH cte",
+			in:      "WITH x AS (SELECT 1) DELETE FROM events",
+			wantErr: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -106,6 +106,10 @@ Question: ` + question
 
 var reSQLStart = regexp.MustCompile(`(?is)\b(select|with)\b`)
 
+// reWriteVerb catches mutating statements that could otherwise ride inside a
+// `WITH ... ` common-table expression (e.g. `WITH x AS (...) DELETE ...`).
+var reWriteVerb = regexp.MustCompile(`(?i)\b(insert|update|delete|drop|alter|create|replace|truncate|attach|detach|reindex|vacuum|pragma)\b`)
+
 // ExtractSQL pulls a single SELECT statement out of agent output, tolerating
 // markdown fences and surrounding prose, and rejects anything that is not a
 // SELECT / WITH ... SELECT.
@@ -135,6 +139,12 @@ func ExtractSQL(out string) (string, error) {
 	}
 	if strings.ContainsRune(sql, ';') {
 		return "", fmt.Errorf("agent output contains multiple statements: %.200s", sql)
+	}
+	// Defense in depth against a mutating verb hidden inside a WITH CTE; the
+	// read-only connection would reject it anyway, but this keeps the promise
+	// that only SELECTs run.
+	if reWriteVerb.MatchString(sql) {
+		return "", fmt.Errorf("agent output contains a non-SELECT statement: %.200s", sql)
 	}
 	return sql, nil
 }

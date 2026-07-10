@@ -3,7 +3,6 @@ package query
 import (
 	"context"
 	"fmt"
-	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -76,21 +75,51 @@ func (e *Engine) Execute(ctx context.Context, question string) (Result, error) {
 }
 
 func (e *Engine) queryRestart(ctx context.Context, q string) (Result, error) {
-	terms := strings.Fields(strings.ToLower(q))
-	events, err := e.store.QueryText(ctx, terms, 200)
+	// Show the process start/stop events that make up a restart. If the
+	// question names a process, narrow to it; otherwise show all.
+	comm := restartComm(q)
+	f := storage.Filter{
+		Categories: []string{"process"},
+		Actions:    []string{"exec", "exit", "fork", "clone"},
+		Limit:      200,
+	}
+	if comm != "" {
+		f.Comms = []string{comm}
+	}
+	events, err := e.store.Query(ctx, f)
 	if err != nil {
 		return Result{}, err
 	}
-	rows := make([]string, 0)
+	rows := make([]string, 0, len(events))
 	for _, ev := range events {
-		if ev.Category == "process" && ev.Action == "exit" {
+		if ev.Action == "exit" {
 			rows = append(rows, fmt.Sprintf("%s process exited pid=%d comm=%s", ev.Timestamp.Format(time.RFC3339), ev.PID, ev.Comm))
-		}
-		if ev.Category == "process" && (ev.Action == "exec" || ev.Action == "fork" || ev.Action == "clone") {
+		} else {
 			rows = append(rows, fmt.Sprintf("%s process started pid=%d comm=%s exe=%s", ev.Timestamp.Format(time.RFC3339), ev.PID, ev.Comm, ev.Exe))
 		}
 	}
-	return Result{Title: "process restart window", Rows: rows}, nil
+	title := "process restart window"
+	if comm != "" {
+		title = fmt.Sprintf("restart window for %s", comm)
+	}
+	return Result{Title: title, Rows: rows}, nil
+}
+
+// restartComm pulls a likely process name out of "what changed before X
+// restarted?"-style questions, ignoring common filler words.
+func restartComm(q string) string {
+	stop := map[string]bool{
+		"what": true, "changed": true, "before": true, "after": true, "the": true,
+		"restarted": true, "restart": true, "was": true, "did": true, "when": true,
+		"why": true, "process": true, "service": true, "a": true, "is": true,
+	}
+	for w := range strings.FieldsSeq(strings.ToLower(q)) {
+		w = strings.Trim(w, "?.,'\"")
+		if w != "" && !stop[w] {
+			return w
+		}
+	}
+	return ""
 }
 
 func (e *Engine) queryConnection(ctx context.Context, q string) (Result, error) {
@@ -103,25 +132,46 @@ func (e *Engine) queryConnection(ctx context.Context, q string) (Result, error) 
 		for _, ev := range events {
 			if ev.Category == "network" && ev.Action == "connect" {
 				rows = append(rows, fmt.Sprintf("%s pid=%d comm=%s -> %s:%d", ev.Timestamp.Format(time.RFC3339), ev.PID, ev.Comm, ev.RemoteAddr, ev.RemotePort))
-			}
-			if ev.RemoteHost != "" && strings.Contains(strings.ToLower(ev.RemoteHost), strings.ToLower(ip[1])) {
+			} else if ev.RemoteHost != "" && strings.Contains(strings.ToLower(ev.RemoteHost), strings.ToLower(ip[1])) {
 				rows = append(rows, fmt.Sprintf("%s pid=%d comm=%s host=%s", ev.Timestamp.Format(time.RFC3339), ev.PID, ev.Comm, ev.RemoteHost))
 			}
 		}
 		return Result{Title: "matching connections", Rows: rows}, nil
 	}
-	terms := strings.Fields(q)
-	events, err := e.store.QueryText(ctx, terms, 200)
+	// Hostname (or no target): list connects, optionally filtered by a host
+	// token appearing in remote_host/remote_addr.
+	host := connectionHost(q)
+	events, err := e.store.Query(ctx, storage.Filter{
+		Categories: []string{"network"},
+		Actions:    []string{"connect"},
+		Limit:      200,
+	})
 	if err != nil {
 		return Result{}, err
 	}
 	rows := make([]string, 0)
 	for _, ev := range events {
-		if ev.Category == "network" && ev.Action == "connect" {
-			rows = append(rows, fmt.Sprintf("%s pid=%d comm=%s -> %s:%d", ev.Timestamp.Format(time.RFC3339), ev.PID, ev.Comm, ev.RemoteAddr, ev.RemotePort))
+		if host != "" &&
+			!strings.Contains(strings.ToLower(ev.RemoteHost), host) &&
+			!strings.Contains(ev.RemoteAddr, host) {
+			continue
 		}
+		rows = append(rows, fmt.Sprintf("%s pid=%d comm=%s -> %s:%d", ev.Timestamp.Format(time.RFC3339), ev.PID, ev.Comm, ev.RemoteAddr, ev.RemotePort))
 	}
 	return Result{Title: "matching connections", Rows: rows}, nil
+}
+
+// connectionHost extracts the target after "connected to" (e.g. a hostname).
+func connectionHost(q string) string {
+	_, after, ok := strings.Cut(strings.ToLower(q), "connected to ")
+	if !ok {
+		return ""
+	}
+	rest := strings.Trim(strings.TrimSpace(after), "?.,'\"")
+	if i := strings.IndexByte(rest, ' '); i >= 0 {
+		rest = rest[:i]
+	}
+	return rest
 }
 
 func (e *Engine) queryPort(ctx context.Context, q string) (Result, error) {
@@ -177,12 +227,3 @@ func (e *Engine) queryFile(ctx context.Context, q string) (Result, error) {
 	}
 	return Result{Title: fmt.Sprintf("activity for file %s", path), Rows: rows}, nil
 }
-
-func normalizeHost(s string) string {
-	host := s
-	if h, _, err := net.SplitHostPort(s); err == nil {
-		host = h
-	}
-	return host
-}
-

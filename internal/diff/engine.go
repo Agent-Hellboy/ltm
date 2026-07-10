@@ -74,16 +74,23 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 	report := DiffReport{From: from, To: to}
 	writes := make(map[string][]storage.Event)
 	lastExit := make(map[string]storage.Event)
+	// A single process creation fires several events (sched fork, clone
+	// syscall, then exec), so dedupe NewProcesses by pid to avoid inflating
+	// the count.
+	seenNewPID := make(map[int]bool)
 	for _, ev := range events {
 		switch ev.Category + ":" + ev.Action {
 		case "process:exec", "process:fork", "process:clone":
-			report.NewProcesses = append(report.NewProcesses, ProcessChange{
-				Timestamp: ev.Timestamp,
-				PID:       ev.PID,
-				Comm:      ev.Comm,
-				Path:      ev.Exe,
-				Action:    ev.Action,
-			})
+			if !seenNewPID[ev.PID] {
+				seenNewPID[ev.PID] = true
+				report.NewProcesses = append(report.NewProcesses, ProcessChange{
+					Timestamp: ev.Timestamp,
+					PID:       ev.PID,
+					Comm:      ev.Comm,
+					Path:      ev.Exe,
+					Action:    ev.Action,
+				})
+			}
 			if priorExit, ok := lastExit[pidKey(ev)]; ok && ev.Timestamp.After(priorExit.Timestamp) {
 				report.Restarts = append(report.Restarts, ProcessRestart{
 					Comm:      ev.Comm,
@@ -100,14 +107,18 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 				Action:    ev.Action,
 			})
 			lastExit[pidKey(ev)] = ev
-		case "file:write", "file:read", "file:rename":
+		case "file:write", "file:rename", "file:truncate", "file:chmod", "file:chown", "file:mkdir":
+			// Reads are not modifications and are deliberately excluded.
 			report.ModifiedFiles = append(report.ModifiedFiles, FileChange{
 				Timestamp: ev.Timestamp,
 				Path:      firstNonEmpty(ev.Path, ev.OldPath),
 				Count:     1,
 				Action:    ev.Action,
 			})
-			writes[firstNonEmpty(ev.Path, ev.OldPath)] = append(writes[firstNonEmpty(ev.Path, ev.OldPath)], ev)
+			// Only content writes feed hot-writer detection.
+			if ev.Action == "write" {
+				writes[firstNonEmpty(ev.Path, ev.OldPath)] = append(writes[firstNonEmpty(ev.Path, ev.OldPath)], ev)
+			}
 		case "file:unlink", "file:rmdir":
 			report.DeletedFiles = append(report.DeletedFiles, FileChange{
 				Timestamp: ev.Timestamp,
