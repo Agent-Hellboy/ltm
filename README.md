@@ -1,6 +1,6 @@
 # ltm
 
-`ltm` is a machine-history debugger for Linux. It records process, file, network, memory, and block-I/O metadata via a real eBPF collector, then lets you query the timeline of what happened — useful for "what broke and why" and for post-incident forensics.
+`ltm` is a machine-history debugger for Linux. It records process, file, network, memory, and block-I/O activity via eBPF, then lets you query the timeline of what happened — for answering "what broke and why" and for post-incident forensics.
 
 ## Quick start
 
@@ -34,7 +34,7 @@ Add `--json` to any read command for machine-readable output.
 
 ## Querying
 
-Events live in one SQLite database (`~/.local/share/ltm/ltm.db`), written WAL by the recorder. Every read command opens it read-only (`PRAGMA query_only=ON`), so queries never contend with the writer or mutate the log.
+Events live in one SQLite database (`~/.local/share/ltm/ltm.db`), written in WAL mode by the recorder. Every read command opens it read-only (`PRAGMA query_only=ON`), so queries never contend with the writer or mutate the log.
 
 `ltm query "<plain English>"` can hand the question to a locally installed coding agent that writes the SQL for you:
 
