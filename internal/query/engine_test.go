@@ -10,13 +10,19 @@ import (
 	"ltm/internal/storage"
 )
 
-func TestQueryEngine(t *testing.T) {
-	t.Parallel()
+func newTestStore(t *testing.T) *storage.Store {
+	t.Helper()
 	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+func TestQueryEngine(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
 	events := []storage.Event{
@@ -125,11 +131,7 @@ func TestQueryEngine(t *testing.T) {
 
 func TestQueryRestartAndConnection(t *testing.T) {
 	t.Parallel()
-	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
 	events := []storage.Event{

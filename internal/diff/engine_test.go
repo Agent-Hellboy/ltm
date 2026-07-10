@@ -9,13 +9,19 @@ import (
 	"ltm/internal/storage"
 )
 
-func TestDiffEngine(t *testing.T) {
-	t.Parallel()
+func newTestStore(t *testing.T) *storage.Store {
+	t.Helper()
 	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+func TestDiffEngine(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 14, 0, 0, 0, time.UTC)
 	events := []storage.Event{
@@ -109,25 +115,41 @@ func TestDiffEngine(t *testing.T) {
 		t.Fatalf("diff: %v", err)
 	}
 
-	if len(report.NewProcesses) == 0 {
-		t.Fatalf("expected new processes")
+	if len(report.NewProcesses) != 2 {
+		t.Fatalf("NewProcesses = %+v, want 2 (pids 1001 and 1004)", report.NewProcesses)
 	}
-	if len(report.ModifiedFiles) == 0 {
-		t.Fatalf("expected modified files")
+	if report.NewProcesses[0].PID != 1001 || report.NewProcesses[0].Comm != "nginx" {
+		t.Fatalf("NewProcesses[0] = %+v, want pid=1001 comm=nginx", report.NewProcesses[0])
 	}
-	if len(report.NewListeners) == 0 {
-		t.Fatalf("expected new listeners")
+	if report.NewProcesses[1].PID != 1004 || report.NewProcesses[1].Comm != "nginx" {
+		t.Fatalf("NewProcesses[1] = %+v, want pid=1004 comm=nginx", report.NewProcesses[1])
 	}
-	if len(report.OutboundConnections) == 0 {
-		t.Fatalf("expected outbound connections")
+
+	if len(report.ExitedProcesses) != 1 || report.ExitedProcesses[0].PID != 1001 {
+		t.Fatalf("ExitedProcesses = %+v, want pid 1001", report.ExitedProcesses)
 	}
-	if len(report.Restarts) == 0 {
-		t.Fatalf("expected restart detection")
+
+	if len(report.ModifiedFiles) != 1 || report.ModifiedFiles[0].Path != "/etc/nginx/nginx.conf" {
+		t.Fatalf("ModifiedFiles = %+v, want /etc/nginx/nginx.conf", report.ModifiedFiles)
 	}
-	if report.Restarts[0].PID != 1004 {
-		t.Fatalf("restart pid = %d, want new exec pid 1004", report.Restarts[0].PID)
+
+	if len(report.NewListeners) != 1 ||
+		report.NewListeners[0].PID != 1001 ||
+		report.NewListeners[0].Socket != "0.0.0.0:8080" {
+		t.Fatalf("NewListeners = %+v, want nginx 0.0.0.0:8080", report.NewListeners)
 	}
-	if len(report.DeletedFiles) == 0 {
-		t.Fatalf("expected rmdir to count as a deleted file")
+
+	if len(report.OutboundConnections) != 1 ||
+		report.OutboundConnections[0].Comm != "curl" ||
+		report.OutboundConnections[0].Socket != "127.0.0.1:8080" {
+		t.Fatalf("OutboundConnections = %+v, want curl 127.0.0.1:8080", report.OutboundConnections)
+	}
+
+	if len(report.Restarts) != 1 || report.Restarts[0].PID != 1004 || report.Restarts[0].Comm != "nginx" {
+		t.Fatalf("Restarts = %+v, want nginx pid 1004", report.Restarts)
+	}
+
+	if len(report.DeletedFiles) != 1 || report.DeletedFiles[0].Path != "/var/run/nginx" {
+		t.Fatalf("DeletedFiles = %+v, want /var/run/nginx", report.DeletedFiles)
 	}
 }

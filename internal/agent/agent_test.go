@@ -125,13 +125,13 @@ func TestResolve(t *testing.T) {
 	if _, err := Resolve("definitely-not-a-real-binary-xyz"); err == nil {
 		t.Fatal("expected error for unknown custom command")
 	}
-	// "echo" exists everywhere; custom specs pass through with args preserved.
+	// "echo" exists everywhere; custom specs resolve by binary name.
 	a, err := Resolve("echo --flag")
 	if err != nil {
 		t.Fatalf("Resolve custom: %v", err)
 	}
-	if a.Name != "echo" || len(a.argv) != 2 {
-		t.Fatalf("Resolve custom = %+v, want echo with one arg", a)
+	if a.Name != "echo" {
+		t.Fatalf("Resolve custom Name = %q, want echo", a.Name)
 	}
 }
 

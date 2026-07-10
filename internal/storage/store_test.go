@@ -8,16 +8,26 @@ import (
 	"time"
 )
 
-func TestStoreInsertAndQuery(t *testing.T) {
-	t.Parallel()
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
 	store, err := Open(filepath.Join(t.TempDir(), "ltm.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+func TestStoreInsertAndQuery(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
-	events := GenerateDemoEvents(base, 12)
+	events := []Event{
+		{Timestamp: base, Category: "process", Action: "exec", PID: 4300, Comm: "worker", Exe: "/usr/bin/worker"},
+		{Timestamp: base.Add(time.Minute), Category: "file", Action: "write", PID: 4300, Comm: "worker", Path: "/tmp/ltm-probe.txt"},
+		{Timestamp: base.Add(2 * time.Minute), Category: "network", Action: "connect", PID: 4301, Comm: "curl", RemoteAddr: "127.0.0.1", RemotePort: 80},
+	}
 	if _, err := store.InsertEvents(context.Background(), events); err != nil {
 		t.Fatalf("insert events: %v", err)
 	}
@@ -38,20 +48,20 @@ func TestStoreInsertAndQuery(t *testing.T) {
 		t.Fatalf("timeline len = %d, want %d", len(timeline), len(events))
 	}
 
-	fileEvents, err := store.EventsByPath(context.Background(), "/tmp/ltm-demo.txt", 100)
+	fileEvents, err := store.EventsByPath(context.Background(), "/tmp/ltm-probe.txt", 100)
 	if err != nil {
 		t.Fatalf("events by path: %v", err)
 	}
-	if len(fileEvents) == 0 {
-		t.Fatalf("expected file events")
+	if len(fileEvents) != 1 || fileEvents[0].PID != 4300 || fileEvents[0].Action != "write" {
+		t.Fatalf("EventsByPath = %+v, want one write by pid 4300", fileEvents)
 	}
 
 	pidEvents, err := store.EventsByPID(context.Background(), 4300, 100)
 	if err != nil {
 		t.Fatalf("events by pid: %v", err)
 	}
-	if len(pidEvents) == 0 {
-		t.Fatalf("expected pid events")
+	if len(pidEvents) != 2 {
+		t.Fatalf("EventsByPID(4300) = %d events, want 2", len(pidEvents))
 	}
 }
 
@@ -98,11 +108,7 @@ func TestStoreReloadPopulatesTimeline(t *testing.T) {
 
 func TestQueryTextEscapesLikeWildcards(t *testing.T) {
 	t.Parallel()
-	store, err := Open(filepath.Join(t.TempDir(), "ltm.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
 	if _, err := store.InsertEvents(context.Background(), []Event{
@@ -125,11 +131,7 @@ func TestQueryTextEscapesLikeWildcards(t *testing.T) {
 
 func TestStoreQueryFilter(t *testing.T) {
 	t.Parallel()
-	store, err := Open(filepath.Join(t.TempDir(), "ltm.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
 	events := []Event{
@@ -251,11 +253,7 @@ func TestOpenEscapesURICharactersInPath(t *testing.T) {
 
 func TestStorePrune(t *testing.T) {
 	t.Parallel()
-	store, err := Open(filepath.Join(t.TempDir(), "ltm.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
 	events := []Event{
@@ -308,11 +306,7 @@ func TestGenerateDemoEventsCount(t *testing.T) {
 
 func TestStatusSumsDroppedEvents(t *testing.T) {
 	t.Parallel()
-	store, err := Open(filepath.Join(t.TempDir(), "ltm.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
 	events := []Event{
@@ -338,11 +332,7 @@ func TestStatusSumsDroppedEvents(t *testing.T) {
 
 func TestEventsAfterIDAndLatest(t *testing.T) {
 	t.Parallel()
-	store, err := Open(filepath.Join(t.TempDir(), "ltm.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
 	if _, err := store.InsertEvents(context.Background(), GenerateDemoEvents(base, 10)); err != nil {
@@ -378,5 +368,37 @@ func TestEventsAfterIDAndLatest(t *testing.T) {
 		if ev.ID != int64(7+i) {
 			t.Fatalf("EventsAfterID(6)[%d].ID = %d, want %d", i, ev.ID, 7+i)
 		}
+	}
+}
+
+func TestStoreSockets(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
+	events := []Event{
+		{Timestamp: base, Category: "network", Action: "listen", PID: 10, Comm: "nginx", LocalAddr: "0.0.0.0", LocalPort: 8080},
+		{Timestamp: base.Add(time.Second), Category: "network", Action: "bind", PID: 11, Comm: "sshd", LocalAddr: "0.0.0.0", LocalPort: 22},
+		{Timestamp: base.Add(2 * time.Second), Category: "network", Action: "connect", PID: 12, Comm: "curl", RemoteAddr: "1.1.1.1", RemotePort: 443},
+		{Timestamp: base.Add(3 * time.Second), Category: "file", Action: "write", PID: 13, Comm: "vim", Path: "/tmp/x"},
+	}
+	if _, err := store.InsertEvents(context.Background(), events); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	got, err := store.Sockets(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("Sockets: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("Sockets len = %d, want 3 network rows", len(got))
+	}
+	byPort := map[int]SocketRecord{}
+	for _, sr := range got {
+		byPort[sr.LocalPort] = sr
+	}
+	if byPort[8080].Comm != "nginx" || byPort[8080].State != "listen" {
+		t.Fatalf("port 8080 = %+v, want nginx listen", byPort[8080])
+	}
+	if byPort[22].Comm != "sshd" || byPort[22].State != "bind" {
+		t.Fatalf("port 22 = %+v, want sshd bind", byPort[22])
 	}
 }

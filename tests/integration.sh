@@ -59,10 +59,32 @@ if [ "${ignored_count}" -ne 0 ]; then
   echo "ignore-path forwarding failed: captured ${ignored_count} events under ${ignored_dir}" >&2
   exit 1
 fi
-sudo "${ltm}" --db "${db}" timeline --since 5m --category process --limit 5
-sudo "${ltm}" --db "${db}" diff --from 5m --to now >"${work_dir}/diff.out"
-head -2 "${work_dir}/diff.out"
-sudo "${ltm}" --db "${db}" query "who modified /tmp/${mark}.renamed.conf?"
+
+timeline_out="$(sudo "${ltm}" --db "${db}" timeline --since 5m --category file --path "/tmp/${mark}%" --limit 50)"
+if ! printf '%s\n' "${timeline_out}" | grep -q "${mark}"; then
+  echo "timeline missing marker file events for ${mark}" >&2
+  echo "${timeline_out}" >&2
+  exit 1
+fi
+
+diff_out="$(sudo "${ltm}" --db "${db}" diff --from 5m --to now)"
+if ! printf '%s\n' "${diff_out}" | grep -q "${mark}"; then
+  echo "diff missing marker file ${mark}" >&2
+  echo "${diff_out}" >&2
+  exit 1
+fi
+
+query_out="$(sudo "${ltm}" --db "${db}" query "who modified /tmp/${mark}.renamed.conf?")"
+if ! printf '%s\n' "${query_out}" | grep -q "${mark}.renamed.conf"; then
+  echo "who-modified query returned no rows for /tmp/${mark}.renamed.conf" >&2
+  echo "${query_out}" >&2
+  exit 1
+fi
+if ! printf '%s\n' "${query_out}" | grep -q '^- '; then
+  echo "who-modified query had a title but no result rows" >&2
+  echo "${query_out}" >&2
+  exit 1
+fi
 
 # Read-only guard: raw SQL writes must be rejected.
 if sudo "${ltm}" --db "${db}" query sql "DELETE FROM events" 2>/dev/null; then

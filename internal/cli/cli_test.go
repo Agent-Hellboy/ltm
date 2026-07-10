@@ -13,6 +13,16 @@ import (
 	"ltm/internal/storage"
 )
 
+func newTestStore(t *testing.T) *storage.Store {
+	t.Helper()
+	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
 func TestParseDurationOrTime(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
@@ -55,11 +65,7 @@ func TestWatchPredicate(t *testing.T) {
 
 func TestWatchStep(t *testing.T) {
 	t.Parallel()
-	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
+	store := newTestStore(t)
 
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
 	if _, err := store.InsertEvents(context.Background(), storage.GenerateDemoEvents(base, 12)); err != nil {
