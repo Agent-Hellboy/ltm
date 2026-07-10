@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"ltm/internal/storage"
 )
@@ -129,125 +130,87 @@ func ExtractSQL(out string) (string, error) {
 	sql := strings.TrimSpace(s[loc[0]:])
 	sql = strings.TrimSuffix(sql, "```")
 	sql = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sql), ";"))
-	upper := strings.ToUpper(sql)
-	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
-		return "", fmt.Errorf("agent output is not a SELECT statement: %.200s", sql)
-	}
-	if hasStatementSeparator(sql) {
-		return "", fmt.Errorf("agent output contains multiple statements: %.200s", sql)
-	}
-	if !isSelectStatement(sql) {
-		return "", fmt.Errorf("agent output contains a non-SELECT statement: %.200s", sql)
+	if err := validateReadOnlySQL(sql); err != nil {
+		return "", err
 	}
 	return sql, nil
 }
 
-func hasStatementSeparator(sql string) bool {
-	for i := 0; i < len(sql); {
-		switch sql[i] {
-		case '\'':
-			i = skipQuoted(sql, i, '\'')
-		case '"':
-			i = skipQuoted(sql, i, '"')
-		case '[':
-			i = skipBracketedIdentifier(sql, i)
-		case '-':
-			if i+1 < len(sql) && sql[i+1] == '-' {
-				i = skipLineComment(sql, i+2)
-			} else {
-				i++
-			}
-		case '/':
-			if i+1 < len(sql) && sql[i+1] == '*' {
-				i = skipBlockComment(sql, i+2)
-			} else {
-				i++
-			}
-		case ';':
-			return true
-		default:
-			i++
+// validateReadOnlySQL rejects multi-statement output and non-SELECT top-level
+// statements (e.g. WITH ... DELETE). OpenReadOnly is the real write guard.
+func validateReadOnlySQL(sql string) error {
+	upper := strings.ToUpper(strings.TrimLeftFunc(sql, unicode.IsSpace))
+	starters, multi := scanTopLevel(sql)
+	if multi {
+		return fmt.Errorf("agent output contains multiple statements: %.200s", sql)
+	}
+	switch {
+	case strings.HasPrefix(upper, "SELECT"):
+		return nil
+	case strings.HasPrefix(upper, "WITH"):
+		// CTE bodies are parenthesized; the first depth-0 statement starter
+		// is the main statement and must be SELECT.
+		if len(starters) == 0 || starters[0] != "SELECT" {
+			return fmt.Errorf("agent output contains a non-SELECT statement: %.200s", sql)
 		}
-	}
-	return false
-}
-
-func isSelectStatement(sql string) bool {
-	keywords := topLevelKeywords(sql)
-	if len(keywords) == 0 {
-		return false
-	}
-	switch keywords[0] {
-	case "SELECT":
-		return true
-	case "WITH":
-		for _, keyword := range keywords[1:] {
-			if isStatementStarter(keyword) {
-				return keyword == "SELECT"
-			}
-		}
-	}
-	return false
-}
-
-func isStatementStarter(keyword string) bool {
-	switch keyword {
-	case "SELECT", "INSERT", "UPDATE", "DELETE", "REPLACE":
-		return true
+		return nil
 	default:
-		return false
+		return fmt.Errorf("agent output is not a SELECT statement: %.200s", sql)
 	}
 }
 
-func topLevelKeywords(sql string) []string {
-	var out []string
+// scanTopLevel walks sql once, returning depth-0 statement starters
+// (SELECT/INSERT/UPDATE/DELETE/REPLACE) and whether a statement separator
+// appears outside quotes/comments.
+func scanTopLevel(sql string) (starters []string, multi bool) {
 	depth := 0
 	for i := 0; i < len(sql); {
-		switch sql[i] {
-		case '\'':
-			i = skipQuoted(sql, i, '\'')
-		case '"':
-			i = skipQuoted(sql, i, '"')
-		case '[':
-			i = skipBracketedIdentifier(sql, i)
-		case '-':
-			if i+1 < len(sql) && sql[i+1] == '-' {
-				i = skipLineComment(sql, i+2)
-			} else {
+		switch c := sql[i]; {
+		case c == '\'':
+			i = skipQuoted(sql, i+1, '\'')
+		case c == '"':
+			i = skipQuoted(sql, i+1, '"')
+		case c == '[':
+			i = skipUntil(sql, i+1, ']')
+		case c == '-' && i+1 < len(sql) && sql[i+1] == '-':
+			for i < len(sql) && sql[i] != '\n' {
 				i++
 			}
-		case '/':
-			if i+1 < len(sql) && sql[i+1] == '*' {
-				i = skipBlockComment(sql, i+2)
-			} else {
+		case c == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			i += 2
+			for i+1 < len(sql) && !(sql[i] == '*' && sql[i+1] == '/') {
 				i++
 			}
-		case '(':
+			if i+1 < len(sql) {
+				i += 2
+			}
+		case c == '(':
 			depth++
 			i++
-		case ')':
+		case c == ')':
 			if depth > 0 {
 				depth--
 			}
 			i++
-		default:
-			if depth == 0 && isIdentStart(sql[i]) {
-				start := i
+		case c == ';':
+			return starters, true
+		case depth == 0 && isIdentStart(c):
+			start := i
+			for i < len(sql) && isIdentPart(sql[i]) {
 				i++
-				for i < len(sql) && isIdentPart(sql[i]) {
-					i++
-				}
-				out = append(out, strings.ToUpper(sql[start:i]))
-				continue
 			}
+			switch strings.ToUpper(sql[start:i]) {
+			case "SELECT", "INSERT", "UPDATE", "DELETE", "REPLACE":
+				starters = append(starters, strings.ToUpper(sql[start:i]))
+			}
+		default:
 			i++
 		}
 	}
-	return out
+	return starters, false
 }
 
-func skipQuoted(sql string, start int, quote byte) int {
-	i := start + 1
+func skipQuoted(sql string, i int, quote byte) int {
 	for i < len(sql) {
 		if sql[i] == quote {
 			if i+1 < len(sql) && sql[i+1] == quote {
@@ -261,32 +224,12 @@ func skipQuoted(sql string, start int, quote byte) int {
 	return len(sql)
 }
 
-func skipBracketedIdentifier(sql string, start int) int {
-	i := start + 1
-	for i < len(sql) {
-		if sql[i] == ']' {
-			return i + 1
-		}
+func skipUntil(sql string, i int, end byte) int {
+	for i < len(sql) && sql[i] != end {
 		i++
 	}
-	return len(sql)
-}
-
-func skipLineComment(sql string, start int) int {
-	i := start
-	for i < len(sql) && sql[i] != '\n' {
-		i++
-	}
-	return i
-}
-
-func skipBlockComment(sql string, start int) int {
-	i := start
-	for i+1 < len(sql) {
-		if sql[i] == '*' && sql[i+1] == '/' {
-			return i + 2
-		}
-		i++
+	if i < len(sql) {
+		return i + 1
 	}
 	return len(sql)
 }
