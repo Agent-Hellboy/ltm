@@ -150,18 +150,17 @@ func (s *Store) InsertEvents(ctx context.Context, events []Event) (InsertStats, 
 	}
 	defer stmt.Close()
 
-	inserted := 0
 	var dropped int64
 	for _, ev := range events {
 		if err := ctx.Err(); err != nil {
-			return InsertStats{Inserted: inserted, Dropped: dropped, WriteLatency: time.Since(start)}, err
+			return InsertStats{Dropped: dropped, WriteLatency: time.Since(start)}, err
 		}
 		if ev.Timestamp.IsZero() {
 			ev.Timestamp = time.Now().UTC()
 		}
 		metadata, err := json.Marshal(ev.Metadata)
 		if err != nil {
-			return InsertStats{Inserted: inserted, Dropped: dropped, WriteLatency: time.Since(start)}, err
+			return InsertStats{Dropped: dropped, WriteLatency: time.Since(start)}, err
 		}
 		raw := ev.Raw
 		if len(raw) == 0 {
@@ -173,24 +172,23 @@ func (s *Store) InsertEvents(ctx context.Context, events []Event) (InsertStats, 
 			ev.RemoteAddr, ev.RemotePort, ev.RemoteHost, ev.TargetPID, ev.ExitCode, ev.DroppedBefore,
 			string(metadata), string(raw),
 		); err != nil {
-			return InsertStats{Inserted: inserted, Dropped: dropped, WriteLatency: time.Since(start)}, err
+			return InsertStats{Dropped: dropped, WriteLatency: time.Since(start)}, err
 		}
 		// DroppedBefore counts events lost immediately before this one, so the
 		// batch total is the sum, not the last value.
 		dropped += ev.DroppedBefore
-		inserted++
 	}
 	if err := tx.Commit(); err != nil {
-		return InsertStats{Inserted: inserted, Dropped: dropped, WriteLatency: time.Since(start)}, err
+		return InsertStats{Dropped: dropped, WriteLatency: time.Since(start)}, err
 	}
-	return InsertStats{Inserted: inserted, Dropped: dropped, WriteLatency: time.Since(start)}, nil
+	return InsertStats{Dropped: dropped, WriteLatency: time.Since(start)}, nil
 }
 
-func scanEvent(row interface{ Scan(dest ...any) error }) (Event, error) {
+func scanEvent(rows *sql.Rows) (Event, error) {
 	var ev Event
 	var ts int64
 	var metadata, raw string
-	if err := row.Scan(
+	if err := rows.Scan(
 		&ev.ID, &ts, &ev.Category, &ev.Action, &ev.PID, &ev.PPID, &ev.UID, &ev.Comm, &ev.Exe,
 		&ev.ContainerID, &ev.CgroupPath, &ev.Path, &ev.OldPath, &ev.LocalAddr, &ev.LocalPort,
 		&ev.RemoteAddr, &ev.RemotePort, &ev.RemoteHost, &ev.TargetPID, &ev.ExitCode, &ev.DroppedBefore,
@@ -419,7 +417,7 @@ func (s *Store) Sockets(ctx context.Context, limit int) ([]SocketRecord, error) 
 		limit = 200
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT pid, comm, local_addr, local_port, remote_addr, remote_port, action, ts
+		SELECT pid, comm, local_port, action, ts
 		FROM events
 		WHERE category = 'network' AND (local_addr != '' OR remote_addr != '')
 		ORDER BY ts DESC, id DESC LIMIT ?`, limit)
@@ -431,7 +429,7 @@ func (s *Store) Sockets(ctx context.Context, limit int) ([]SocketRecord, error) 
 	for rows.Next() {
 		var sr SocketRecord
 		var ts int64
-		if err := rows.Scan(&sr.PID, &sr.Comm, &sr.LocalAddr, &sr.LocalPort, &sr.RemoteAddr, &sr.RemotePort, &sr.State, &ts); err != nil {
+		if err := rows.Scan(&sr.PID, &sr.Comm, &sr.LocalPort, &sr.State, &ts); err != nil {
 			return nil, err
 		}
 		sr.SeenAt = time.Unix(0, ts).UTC()

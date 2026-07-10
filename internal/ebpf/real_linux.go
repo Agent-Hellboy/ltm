@@ -26,11 +26,7 @@ import (
 //go:embed collector_bpfel.o
 var collectorBPFEL []byte
 
-type RealCollector struct {
-	BufferPages int
-}
-
-func (RealCollector) Name() string { return "ebpf" }
+type RealCollector struct{}
 
 type kernelEvent struct {
 	TsNs       uint64
@@ -115,11 +111,7 @@ func (r RealCollector) Run(ctx context.Context, out chan<- storage.Event) error 
 		fmt.Fprintf(os.Stderr, "ltm: ebpf collector attached %d tracepoints, skipped %d\n", attached, skipped)
 	}
 
-	perfBuf := r.BufferPages
-	if perfBuf <= 0 {
-		perfBuf = 64
-	}
-	reader, err := perf.NewReader(coll.Maps["events"], perfBuf*4096)
+	reader, err := perf.NewReader(coll.Maps["events"], 64*4096)
 	if err != nil {
 		return fmt.Errorf("create perf reader: %w", err)
 	}

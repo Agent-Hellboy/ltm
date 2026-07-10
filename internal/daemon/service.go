@@ -11,7 +11,6 @@ import (
 
 type Config struct {
 	IgnorePaths []string
-	BufferSize  int
 	BatchSize   int
 	FlushPeriod time.Duration
 }
@@ -22,9 +21,6 @@ type Service struct {
 }
 
 func NewService(store *storage.Store, cfg Config) *Service {
-	if cfg.BufferSize <= 0 {
-		cfg.BufferSize = 2048
-	}
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 128
 	}
@@ -35,26 +31,26 @@ func NewService(store *storage.Store, cfg Config) *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	return s.runWithSources(ctx, []ebpf.Source{ebpf.RealCollector{}})
+	return s.runWithSource(ctx, ebpf.RealCollector{})
 }
 
-func (s *Service) runWithSources(ctx context.Context, sources []ebpf.Source) error {
+func (s *Service) runWithSource(ctx context.Context, src ebpf.Source) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	ingest := make(chan storage.Event, s.cfg.BufferSize)
+	ingest := make(chan storage.Event, 2048)
 	col := collector.New(collector.Config{
 		IgnorePaths: s.cfg.IgnorePaths,
-		BufferSize:  s.cfg.BufferSize / 2,
+		BufferSize:  1024,
 	})
 
 	colErr := make(chan error, 1)
 	go func() {
-		colErr <- col.Run(ctx, sources, ingest)
+		colErr <- col.Run(ctx, src, ingest)
 	}()
 	flushErr := make(chan error, 1)
 	go func() {
-		flushErr <- s.flushLoop(ctx, ingest, func() int64 { return col.Stats().DroppedEvents })
+		flushErr <- s.flushLoop(ctx, ingest, col.DroppedEvents)
 	}()
 
 	var runErr error
@@ -95,11 +91,9 @@ func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event, dr
 		if len(batch) == 0 {
 			return nil
 		}
-		if droppedFn != nil {
-			if cur := droppedFn(); cur > lastDropped {
-				batch[0].DroppedBefore += cur - lastDropped
-				lastDropped = cur
-			}
+		if cur := droppedFn(); cur > lastDropped {
+			batch[0].DroppedBefore += cur - lastDropped
+			lastDropped = cur
 		}
 		_, err := s.store.InsertEvents(fctx, batch)
 		batch = batch[:0]

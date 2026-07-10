@@ -20,9 +20,8 @@ func NewEngine(store *storage.Store) *Engine {
 }
 
 type Result struct {
-	Title   string   `json:"title"`
-	Summary string   `json:"summary,omitempty"`
-	Rows    []string `json:"rows"`
+	Title string   `json:"title"`
+	Rows  []string `json:"rows"`
 }
 
 var (

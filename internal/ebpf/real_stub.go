@@ -10,8 +10,6 @@ import (
 
 type RealCollector struct{}
 
-func (RealCollector) Name() string { return "ebpf" }
-
 func (RealCollector) Run(context.Context, chan<- storage.Event) error {
 	return ErrNotImplemented
 }

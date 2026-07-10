@@ -7,6 +7,5 @@ import (
 )
 
 type Source interface {
-	Name() string
 	Run(context.Context, chan<- storage.Event) error
 }

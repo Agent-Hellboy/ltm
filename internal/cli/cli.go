@@ -203,11 +203,7 @@ func daemonArgs(cfg Config) []string {
 }
 
 func customIgnorePaths(paths []string) []string {
-	defaults := defaultConfig().IgnorePaths
-	defaultSet := make(map[string]bool, len(defaults))
-	for _, path := range defaults {
-		defaultSet[path] = true
-	}
+	defaultSet := sliceToSet(defaultConfig().IgnorePaths)
 	var out []string
 	for _, path := range paths {
 		if !defaultSet[path] {
@@ -538,19 +534,11 @@ func runAgentQuery(cfg Config, a *agent.Agent, question string, jsonOut bool) er
 		return fmt.Errorf("agent %s produced invalid SQL (%v): %s", a.Name, err, sqlText)
 	}
 	if jsonOut {
-		out := make([]map[string]any, 0, len(rows))
-		for _, row := range rows {
-			m := make(map[string]any, len(cols))
-			for i, c := range cols {
-				m[c] = row[i]
-			}
-			out = append(out, m)
-		}
 		return writeJSON(os.Stdout, map[string]any{
 			"question": question,
 			"agent":    a.Name,
 			"sql":      sqlText,
-			"rows":     out,
+			"rows":     rowsToMaps(cols, rows),
 		})
 	}
 	fmt.Fprintf(os.Stderr, "[%s] %s\n", a.Name, sqlText)
@@ -612,17 +600,21 @@ func execReadOnlySQL(cfg Config, query string, jsonOut bool) error {
 		return err
 	}
 	if jsonOut {
-		out := make([]map[string]any, 0, len(rows))
-		for _, row := range rows {
-			m := make(map[string]any, len(cols))
-			for i, c := range cols {
-				m[c] = row[i]
-			}
-			out = append(out, m)
-		}
-		return writeJSON(os.Stdout, out)
+		return writeJSON(os.Stdout, rowsToMaps(cols, rows))
 	}
 	return printSQLTable(os.Stdout, cols, rows)
+}
+
+func rowsToMaps(cols []string, rows [][]any) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		m := make(map[string]any, len(cols))
+		for i, c := range cols {
+			m[c] = row[i]
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func runPrune(cfg Config, args []string) error {
@@ -870,9 +862,6 @@ func printDiff(w io.Writer, report diff.DiffReport) error {
 
 func printQueryResult(w io.Writer, result query.Result) error {
 	fmt.Fprintln(w, result.Title)
-	if result.Summary != "" {
-		fmt.Fprintln(w, result.Summary)
-	}
 	for _, row := range result.Rows {
 		fmt.Fprintln(w, "- "+row)
 	}

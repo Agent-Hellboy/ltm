@@ -59,14 +59,11 @@ type Event struct {
 }
 
 type SocketRecord struct {
-	PID        int       `json:"pid"`
-	Comm       string    `json:"comm"`
-	LocalAddr  string    `json:"local_addr"`
-	LocalPort  int       `json:"local_port"`
-	RemoteAddr string    `json:"remote_addr,omitempty"`
-	RemotePort int       `json:"remote_port,omitempty"`
-	State      string    `json:"state"`
-	SeenAt     time.Time `json:"seen_at"`
+	PID       int       `json:"pid"`
+	Comm      string    `json:"comm"`
+	LocalPort int       `json:"local_port"`
+	State     string    `json:"state"`
+	SeenAt    time.Time `json:"seen_at"`
 }
 
 type Status struct {
@@ -77,7 +74,6 @@ type Status struct {
 }
 
 type InsertStats struct {
-	Inserted     int
 	Dropped      int64
 	WriteLatency time.Duration
 }

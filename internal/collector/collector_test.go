@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"ltm/internal/ebpf"
 	"ltm/internal/storage"
 )
 
@@ -14,8 +13,6 @@ import (
 type staticSource struct {
 	events []storage.Event
 }
-
-func (s staticSource) Name() string { return "static" }
 
 func (s staticSource) Run(ctx context.Context, out chan<- storage.Event) error {
 	for _, ev := range s.events {
@@ -42,7 +39,7 @@ func TestCollectorFiltersIgnoredPaths(t *testing.T) {
 	out := make(chan storage.Event, 16)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- c.Run(ctx, []ebpf.Source{src}, out) }()
+	go func() { done <- c.Run(ctx, src, out) }()
 
 	var got []storage.Event
 	deadline := time.After(2 * time.Second)

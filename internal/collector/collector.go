@@ -5,7 +5,6 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"ltm/internal/ebpf"
@@ -17,13 +16,9 @@ type Config struct {
 	BufferSize  int
 }
 
-type Stats struct {
-	DroppedEvents int64
-}
-
 type Collector struct {
 	cfg         Config
-	stats       Stats
+	dropped     int64
 	ignoreRules []string
 }
 
@@ -35,30 +30,19 @@ func New(cfg Config) *Collector {
 	return &Collector{cfg: cfg, ignoreRules: normalizeIgnoreRules(append(base, cfg.IgnorePaths...))}
 }
 
-func (c *Collector) Stats() Stats {
-	return Stats{DroppedEvents: atomic.LoadInt64(&c.stats.DroppedEvents)}
+func (c *Collector) DroppedEvents() int64 {
+	return atomic.LoadInt64(&c.dropped)
 }
 
-func (c *Collector) Run(ctx context.Context, sources []ebpf.Source, out chan<- storage.Event) error {
-	if len(sources) == 0 {
-		return nil
-	}
+func (c *Collector) Run(ctx context.Context, src ebpf.Source, out chan<- storage.Event) error {
 	in := make(chan storage.Event, c.cfg.BufferSize)
-	errCh := make(chan error, len(sources))
-	var wg sync.WaitGroup
-	for _, src := range sources {
-		wg.Go(func() {
-			if err := src.Run(ctx, in); err != nil && !errors.Is(err, context.Canceled) {
-				select {
-				case errCh <- err:
-				default:
-				}
-			}
-		})
-	}
+	errCh := make(chan error, 1)
 	go func() {
-		wg.Wait()
+		err := src.Run(ctx, in)
 		close(in)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			errCh <- err
+		}
 		close(errCh)
 	}()
 
@@ -68,8 +52,6 @@ func (c *Collector) Run(ctx context.Context, sources []ebpf.Source, out chan<- s
 			return nil
 		case err, ok := <-errCh:
 			if !ok {
-				// Sources have finished; stop selecting on the closed channel
-				// (a closed channel is always ready and would busy-spin).
 				errCh = nil
 				continue
 			}
@@ -86,7 +68,7 @@ func (c *Collector) Run(ctx context.Context, sources []ebpf.Source, out chan<- s
 			select {
 			case out <- ev:
 			default:
-				atomic.AddInt64(&c.stats.DroppedEvents, 1)
+				atomic.AddInt64(&c.dropped, 1)
 			}
 		}
 	}
