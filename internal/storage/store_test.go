@@ -95,6 +95,33 @@ func TestStoreReloadPopulatesTimeline(t *testing.T) {
 	}
 }
 
+func TestQueryTextEscapesLikeWildcards(t *testing.T) {
+	t.Parallel()
+	store, err := Open(filepath.Join(t.TempDir(), "ltm.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
+	if _, err := store.InsertEvents(context.Background(), []Event{
+		{Timestamp: base, Category: "process", Action: "exec", PID: 1, Comm: "a_c"},
+		{Timestamp: base.Add(time.Second), Category: "process", Action: "exec", PID: 2, Comm: "abc"},
+	}); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+
+	// "_" is a LIKE wildcard; escaped, "a_c" must match only the literal "a_c",
+	// not "abc".
+	got, err := store.QueryText(context.Background(), []string{"a_c"}, 100)
+	if err != nil {
+		t.Fatalf("query text: %v", err)
+	}
+	if len(got) != 1 || got[0].Comm != "a_c" {
+		t.Fatalf("QueryText(\"a_c\") = %d rows %+v, want only the literal a_c", len(got), got)
+	}
+}
+
 func TestStoreQueryFilter(t *testing.T) {
 	t.Parallel()
 	store, err := Open(filepath.Join(t.TempDir(), "ltm.db"))

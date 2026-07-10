@@ -22,15 +22,17 @@ type Stats struct {
 }
 
 type Collector struct {
-	cfg   Config
-	stats Stats
+	cfg         Config
+	stats       Stats
+	ignoreRules []string
 }
 
 func New(cfg Config) *Collector {
 	if cfg.BufferSize <= 0 {
 		cfg.BufferSize = 1024
 	}
-	return &Collector{cfg: cfg}
+	base := []string{"/proc", "/sys", "/dev", "/var/cache/apt", "/var/cache/dnf", "/var/cache/pacman"}
+	return &Collector{cfg: cfg, ignoreRules: append(base, cfg.IgnorePaths...)}
 }
 
 func (c *Collector) Stats() Stats {
@@ -45,17 +47,14 @@ func (c *Collector) Run(ctx context.Context, sources []ebpf.Source, out chan<- s
 	errCh := make(chan error, len(sources))
 	var wg sync.WaitGroup
 	for _, src := range sources {
-		src := src
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := src.Run(ctx, in); err != nil && !errors.Is(err, context.Canceled) {
 				select {
 				case errCh <- err:
 				default:
 				}
 			}
-		}()
+		})
 	}
 	go func() {
 		wg.Wait()
@@ -68,7 +67,13 @@ func (c *Collector) Run(ctx context.Context, sources []ebpf.Source, out chan<- s
 		case <-ctx.Done():
 			return nil
 		case err, ok := <-errCh:
-			if ok && err != nil {
+			if !ok {
+				// Sources have finished; stop selecting on the closed channel
+				// (a closed channel is always ready and would busy-spin).
+				errCh = nil
+				continue
+			}
+			if err != nil {
 				return err
 			}
 		case ev, ok := <-in:
@@ -92,22 +97,12 @@ func (c *Collector) shouldIgnore(path string) bool {
 		return false
 	}
 	normalized := filepath.Clean(path)
-	for _, rule := range defaultIgnoreRules(c.cfg.IgnorePaths) {
-		if strings.HasPrefix(normalized, rule) {
+	for _, rule := range c.ignoreRules {
+		// Match the rule itself or a path beneath it, so "/proc" does not also
+		// swallow "/procession".
+		if normalized == rule || strings.HasPrefix(normalized, rule+"/") {
 			return true
 		}
 	}
 	return false
-}
-
-func defaultIgnoreRules(extra []string) []string {
-	base := []string{
-		"/proc",
-		"/sys",
-		"/dev",
-		"/var/cache/apt",
-		"/var/cache/dnf",
-		"/var/cache/pacman",
-	}
-	return append(base, extra...)
 }

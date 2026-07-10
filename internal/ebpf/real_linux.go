@@ -204,12 +204,15 @@ func convertKernelEvent(bootTime time.Time, ke kernelEvent, dropped uint64) stor
 		ev.Exe = ev.Path
 	}
 	if ev.Category == "block" {
-		// For block events ke.Path carries the rwbs flags string, not a real
-		// path — surface it as metadata and keep Path empty.
+		// Block events reuse the generic fields to carry disk-request data:
+		// ke.Path is the rwbs flag string, ke.Aux the device, ke.SyscallNR the
+		// sector count. Replace the misleading generic metadata accordingly.
 		ev.Path = ""
-		ev.Metadata["dev"] = ke.Aux
-		ev.Metadata["nr_sector"] = ke.SyscallNR
-		ev.Metadata["rwbs"] = cstring(ke.Path[:])
+		ev.Metadata = map[string]any{
+			"dev":       ke.Aux,
+			"nr_sector": ke.SyscallNR,
+			"rwbs":      cstring(ke.Path[:]),
+		}
 	}
 	if ev.Category == "process" && ev.Action == "fork" && ke.Aux != 0 {
 		ev.PPID = int(ke.Aux)
@@ -233,9 +236,9 @@ func wallClockBootTime() (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "btime ") {
-			sec, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(line, "btime ")), 10, 64)
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(line, "btime "); ok {
+			sec, err := strconv.ParseInt(strings.TrimSpace(rest), 10, 64)
 			if err != nil {
 				return time.Time{}, err
 			}

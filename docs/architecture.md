@@ -1,29 +1,36 @@
 # Architecture
 
-The MVP is intentionally split around a narrow event contract.
+Everything is organized around one narrow contract: `storage.Event`. Collectors
+produce events; the store persists them; the diff and query engines read them
+back. Nothing downstream of the store knows how events were collected.
 
-## Flow
+## Pipeline
 
-1. A collector emits normalized `storage.Event` values.
-2. `collector` applies ignore rules and bounded buffering.
-3. `daemon` batches writes and flushes to the store.
-4. `storage` appends events and maintains read models for timeline, diff, and query.
-5. `diff` and `query` work only from stored metadata.
+```
+eBPF tracepoints ──▶ ebpf.RealCollector ──▶ collector ──▶ daemon.flushLoop ──▶ storage (SQLite)
+                     (kernel → Event)      (ignore +      (batches into        (WAL writer)
+                                            buffering)     transactions)
+```
 
-## Phase 1
+1. `internal/ebpf` attaches syscall/sched/block tracepoints and converts each
+   kernel record into a `storage.Event` (Linux only; a stub errors elsewhere).
+2. `internal/collector` drops ignored paths (`/proc`, `/sys`, `/dev`, caches)
+   and buffers, counting events shed under backpressure.
+3. `internal/daemon` batches events and writes each batch in one transaction;
+   on shutdown it drains the buffer and flushes with a fresh context.
+4. `internal/storage` owns the SQLite database. The daemon holds the single
+   WAL writer; every read path opens read-only with `PRAGMA query_only=ON`.
 
-- Local event store
-- Deterministic diff and query engines
-- CLI end to end
+## Reading
 
-## Phase 2
+- `internal/diff` summarizes machine-state change between two timestamps.
+- `internal/query` answers structured filters, raw read-only SQL, and
+  plain-English questions — the last optionally delegated to a coding-agent CLI
+  (`internal/agent`) that emits SQL, always validated down to a single `SELECT`.
 
-- Real eBPF syscall tracepoint collector on Linux (the only collector)
-- Broad syscall coverage: process, file, memory, network, and block I/O tracepoints
-- Embedded BPF object in `internal/ebpf/collector_bpfel.o`
+## Notes
 
-## Current
-
-- SQLite-backed store queried read-only; structured filters, raw SQL, and agent-assisted natural-language queries
-- The earlier demo/synthetic collector has been removed; `ltm benchmark` seeds synthetic events for testing without recording
-
+- `ltm benchmark` generates synthetic events to exercise the store without
+  recording; there is no simulated collector.
+- The BPF object is compiled ahead of time and embedded
+  (`internal/ebpf/collector_bpfel.o`); rebuild it with `make ebpf`.

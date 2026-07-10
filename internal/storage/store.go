@@ -377,10 +377,11 @@ func (s *Store) QueryText(ctx context.Context, terms []string, limit int) ([]Eve
 	var where []string
 	var args []any
 	for _, term := range terms {
+		pattern := "%" + escapeLike(term) + "%"
 		var col []string
 		for _, c := range textSearchColumns {
-			col = append(col, "lower("+c+") LIKE ?")
-			args = append(args, "%"+term+"%")
+			col = append(col, "lower("+c+") LIKE ? ESCAPE '\\'")
+			args = append(args, pattern)
 		}
 		where = append(where, "("+strings.Join(col, " OR ")+")")
 	}
@@ -388,6 +389,13 @@ func (s *Store) QueryText(ctx context.Context, terms []string, limit int) ([]Eve
 		` ORDER BY ts DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 	return s.queryEvents(ctx, query, args...)
+}
+
+// escapeLike neutralizes the LIKE metacharacters so a search term containing
+// %, _, or \ matches literally (paired with `ESCAPE '\'`).
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
 }
 
 func normalizeTerms(terms []string) []string {

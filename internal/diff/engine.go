@@ -2,6 +2,7 @@ package diff
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -131,7 +132,7 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 				Timestamp: ev.Timestamp,
 				PID:       ev.PID,
 				Comm:      ev.Comm,
-				Socket:    ev.LocalAddr + ":" + itoa(ev.LocalPort),
+				Socket:    ev.LocalAddr + ":" + strconv.Itoa(ev.LocalPort),
 				Action:    ev.Action,
 			})
 		case "network:connect", "network:send":
@@ -139,7 +140,7 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 				Timestamp: ev.Timestamp,
 				PID:       ev.PID,
 				Comm:      ev.Comm,
-				Socket:    ev.RemoteAddr + ":" + itoa(ev.RemotePort),
+				Socket:    ev.RemoteAddr + ":" + strconv.Itoa(ev.RemotePort),
 				Action:    ev.Action,
 			})
 		}
@@ -159,7 +160,7 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 }
 
 func pidKey(ev storage.Event) string {
-	return ev.Comm + ":" + itoa(ev.PID)
+	return ev.Comm + ":" + strconv.Itoa(ev.PID)
 }
 
 func firstNonEmpty(items ...string) string {
@@ -169,26 +170,4 @@ func firstNonEmpty(items ...string) string {
 		}
 	}
 	return ""
-}
-
-func itoa(v int) string {
-	if v == 0 {
-		return "0"
-	}
-	var buf [32]byte
-	n := len(buf)
-	neg := v < 0
-	if neg {
-		v = -v
-	}
-	for v > 0 {
-		n--
-		buf[n] = byte('0' + v%10)
-		v /= 10
-	}
-	if neg {
-		n--
-		buf[n] = '-'
-	}
-	return string(buf[n:])
 }

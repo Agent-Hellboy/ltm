@@ -179,6 +179,9 @@ func runStart(cfg Config, args []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+	// Detach into its own session so the recorder keeps running after the
+	// launching shell exits (otherwise it takes SIGHUP on terminal close).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -673,6 +676,12 @@ func printRootHelp(w io.Writer) {
 	fmt.Fprintln(w, "  prune      [--older-than]")
 	fmt.Fprintln(w, "  benchmark")
 	fmt.Fprintln(w, "  version")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Global flags (before the command):")
+	fmt.Fprintln(w, "  --db <path>           storage database (default ~/.local/share/ltm/ltm.db)")
+	fmt.Fprintln(w, "  --pidfile <path>      pid file (default ~/.local/run/ltm.pid)")
+	fmt.Fprintln(w, "  --json                machine-readable output for read commands")
+	fmt.Fprintln(w, "  --ignore-path <p>     extra path prefix to skip while recording (repeatable)")
 }
 
 func printVersion(w io.Writer, jsonOut bool) error {

@@ -21,7 +21,7 @@ internal/
   agent/              external agent CLI bridge (NL question -> SQL)
   diff/               time-window machine-state diff
   query/              deterministic query templates over stored events
-tests/                integration script and small HTTP fixture
+tests/                integration script
 docs/                 architecture and security notes
 ```
 
