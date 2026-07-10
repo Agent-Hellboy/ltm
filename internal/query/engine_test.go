@@ -56,6 +56,20 @@ func TestQueryEngine(t *testing.T) {
 			RemotePort:    8080,
 			RemoteHost:    "localhost",
 		},
+		{
+			SchemaVersion: storage.SchemaVersion,
+			Timestamp:     base.Add(3 * time.Minute),
+			Category:      "network",
+			Action:        "connect",
+			PID:           4444,
+			PPID:          1,
+			UID:           1000,
+			Comm:          "local-only",
+			LocalAddr:     "127.0.0.1",
+			LocalPort:     39000,
+			RemoteAddr:    "203.0.113.10",
+			RemotePort:    443,
+		},
 	}
 	if _, err := store.InsertEvents(context.Background(), events); err != nil {
 		t.Fatalf("insert events: %v", err)
@@ -93,6 +107,19 @@ func TestQueryEngine(t *testing.T) {
 	}
 	if len(res.Rows) == 0 || !strings.Contains(res.Rows[0], "curl") {
 		t.Fatalf("expected curl connection to 127.0.0.1, got: %+v", res.Rows)
+	}
+	for _, row := range res.Rows {
+		if strings.Contains(row, "local-only") {
+			t.Fatalf("connected-to IP query matched local_addr instead of remote target: %+v", res.Rows)
+		}
+	}
+
+	res, err = engine.Execute(context.Background(), "who modified /etc/nginx/nginx.conf")
+	if err != nil {
+		t.Fatalf("execute who modified without question mark: %v", err)
+	}
+	if len(res.Rows) == 0 || !strings.Contains(res.Rows[0], "vim") {
+		t.Fatalf("unexpected who-modified result without question mark: %+v", res.Rows)
 	}
 }
 

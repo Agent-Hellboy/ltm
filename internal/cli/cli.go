@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -676,14 +677,22 @@ func runDaemon(cfg Config, args []string) error {
 func signalContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	var once sync.Once
 	signalNotify(ch)
 	go func() {
-		<-ch
-		cancel()
+		select {
+		case <-ch:
+			cancel()
+		case <-done:
+		}
 	}()
 	return ctx, func() {
-		signalStop(ch)
-		cancel()
+		once.Do(func() {
+			signalStop(ch)
+			close(done)
+			cancel()
+		})
 	}
 }
 

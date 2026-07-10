@@ -44,7 +44,7 @@ sudo "${ltm}" --pidfile "${pid_file}" stop
 sleep 1
 
 # Everything below reads the root-owned DB, so run as root too.
-sudo "${ltm}" --db "${db}" status
+sudo "${ltm}" --db "${db}" --pidfile "${pid_file}" status
 
 count="$(sudo "${ltm}" --db "${db}" query sql "SELECT count(*) FROM events" | tail -1)"
 echo "captured ${count} events"

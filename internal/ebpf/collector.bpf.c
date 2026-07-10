@@ -185,7 +185,7 @@ static __always_inline int path_ignored_prefix(const char *prefix) {
 }
 
 static __always_inline int path_ignored_user(const char *path) {
-	char buf[6] = {};
+	char buf[7] = {};
 	if (bpf_probe_read_user_str(buf, sizeof(buf), path) <= 0) {
 		return 0;
 	}

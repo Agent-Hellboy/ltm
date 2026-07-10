@@ -26,7 +26,7 @@ type Result struct {
 }
 
 var (
-	reWhoModified = regexp.MustCompile(`(?i)^who modified (.+)\?$`)
+	reWhoModified = regexp.MustCompile(`(?i)^who modified (.+?)\??$`)
 	rePid         = regexp.MustCompile(`(?i)\bpid\s+(\d+)\b`)
 	rePort        = regexp.MustCompile(`(?i)\bport\s+(\d+)\b`)
 	reIP          = regexp.MustCompile(`(?i)\b(\d+\.\d+\.\d+\.\d+)\b`)
@@ -124,17 +124,20 @@ func restartComm(q string) string {
 
 func (e *Engine) queryConnection(ctx context.Context, q string) (Result, error) {
 	if ip := reIP.FindStringSubmatch(q); len(ip) == 2 {
-		events, err := e.store.QueryText(ctx, []string{ip[1]}, 200)
+		events, err := e.store.Query(ctx, storage.Filter{
+			Categories: []string{"network"},
+			Actions:    []string{"connect"},
+			Limit:      200,
+		})
 		if err != nil {
 			return Result{}, err
 		}
 		rows := make([]string, 0)
 		for _, ev := range events {
-			if ev.Category == "network" && ev.Action == "connect" {
-				rows = append(rows, fmt.Sprintf("%s pid=%d comm=%s -> %s:%d", ev.Timestamp.Format(time.RFC3339), ev.PID, ev.Comm, ev.RemoteAddr, ev.RemotePort))
-			} else if ev.RemoteHost != "" && strings.Contains(strings.ToLower(ev.RemoteHost), strings.ToLower(ip[1])) {
-				rows = append(rows, fmt.Sprintf("%s pid=%d comm=%s host=%s", ev.Timestamp.Format(time.RFC3339), ev.PID, ev.Comm, ev.RemoteHost))
+			if ev.RemoteAddr != ip[1] && !strings.Contains(strings.ToLower(ev.RemoteHost), strings.ToLower(ip[1])) {
+				continue
 			}
+			rows = append(rows, fmt.Sprintf("%s pid=%d comm=%s -> %s:%d", ev.Timestamp.Format(time.RFC3339), ev.PID, ev.Comm, ev.RemoteAddr, ev.RemotePort))
 		}
 		return Result{Title: "matching connections", Rows: rows}, nil
 	}

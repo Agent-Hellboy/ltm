@@ -3,11 +3,29 @@ package daemon
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"ltm/internal/ebpf"
 	"ltm/internal/storage"
 )
+
+type oneEventSource struct {
+	event storage.Event
+}
+
+func (s oneEventSource) Name() string { return "one-event" }
+
+func (s oneEventSource) Run(ctx context.Context, out chan<- storage.Event) error {
+	select {
+	case out <- s.event:
+	case <-ctx.Done():
+		return nil
+	}
+	<-ctx.Done()
+	return nil
+}
 
 // flushLoop should attribute the collector's dropped-event delta to the batch
 // so the total surfaces in Status instead of vanishing.
@@ -103,5 +121,29 @@ func TestFlushLoopNilDroppedFn(t *testing.T) {
 	}
 	if status.EventCount != 1 || status.DroppedEvents != 0 {
 		t.Fatalf("status = %+v, want 1 event / 0 dropped", status)
+	}
+}
+
+func TestRunReturnsFlushError(t *testing.T) {
+	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	svc := NewService(store, Config{BatchSize: 1, FlushPeriod: time.Hour})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err = svc.runWithSources(ctx, []ebpf.Source{oneEventSource{event: storage.Event{
+		Timestamp: time.Now(),
+		Category:  "file",
+		Action:    "write",
+		PID:       1,
+	}}})
+	if err == nil || !strings.Contains(err.Error(), "store closed") {
+		t.Fatalf("runWithSources error = %v, want flush/store error", err)
 	}
 }

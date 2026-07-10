@@ -35,6 +35,10 @@ func NewService(store *storage.Store, cfg Config) *Service {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	return s.runWithSources(ctx, []ebpf.Source{ebpf.RealCollector{}})
+}
+
+func (s *Service) runWithSources(ctx context.Context, sources []ebpf.Source) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -43,8 +47,6 @@ func (s *Service) Run(ctx context.Context) error {
 		IgnorePaths: s.cfg.IgnorePaths,
 		BufferSize:  s.cfg.BufferSize / 2,
 	})
-
-	sources := []ebpf.Source{ebpf.RealCollector{}}
 
 	colErr := make(chan error, 1)
 	go func() {
@@ -56,17 +58,26 @@ func (s *Service) Run(ctx context.Context) error {
 	}()
 
 	var runErr error
+	flushDone := false
 	select {
 	case <-ctx.Done():
 	case runErr = <-colErr:
+	case runErr = <-flushErr:
+		flushDone = true
 	}
 	// Stop the collector and flush loop, then wait for the flush loop to drain
 	// and persist its final batch before returning. The caller closes the store
 	// right after Run returns, so returning early would drop buffered events and
 	// race the writer against Store.Close.
 	cancel()
-	if ferr := <-flushErr; ferr != nil && runErr == nil {
-		runErr = ferr
+	if flushDone {
+		if cerr := <-colErr; cerr != nil && runErr == nil {
+			runErr = cerr
+		}
+	} else {
+		if ferr := <-flushErr; ferr != nil && runErr == nil {
+			runErr = ferr
+		}
 	}
 	return runErr
 }

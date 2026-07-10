@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -110,6 +111,48 @@ func TestDaemonArgsForwardCustomIgnorePaths(t *testing.T) {
 	}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("daemonArgs = %#v, want %#v", args, want)
+	}
+}
+
+func TestSignalContextCancelIsIdempotent(t *testing.T) {
+	oldNotify, oldStop := signalNotify, signalStop
+	t.Cleanup(func() {
+		signalNotify = oldNotify
+		signalStop = oldStop
+	})
+
+	notifyCh := make(chan chan<- os.Signal, 1)
+	stopCh := make(chan struct{}, 2)
+	signalNotify = func(ch chan<- os.Signal) {
+		notifyCh <- ch
+	}
+	signalStop = func(ch chan<- os.Signal) {
+		stopCh <- struct{}{}
+	}
+
+	ctx, cancel := signalContext()
+	select {
+	case <-notifyCh:
+	case <-time.After(time.Second):
+		t.Fatal("signalNotify was not called")
+	}
+
+	cancel()
+	cancel()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("context was not cancelled")
+	}
+	select {
+	case <-stopCh:
+	case <-time.After(time.Second):
+		t.Fatal("signalStop was not called")
+	}
+	select {
+	case <-stopCh:
+		t.Fatal("signalStop called more than once")
+	default:
 	}
 }
 
