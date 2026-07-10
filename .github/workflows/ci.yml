@@ -34,7 +34,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Run demo integration flow
+      - name: Run eBPF integration flow
         run: bash tests/integration.sh
 
   linux-build:

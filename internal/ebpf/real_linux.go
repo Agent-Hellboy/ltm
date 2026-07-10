@@ -109,7 +109,7 @@ func (r RealCollector) Run(ctx context.Context, out chan<- storage.Event) error 
 		attached++
 	}
 	if attached == 0 {
-		return errors.New("no tracepoints could be attached; ebpf mode needs root with CAP_BPF and CAP_PERFMON")
+		return errors.New("no tracepoints could be attached; recording needs root with CAP_BPF and CAP_PERFMON")
 	}
 	if skipped > 0 {
 		fmt.Fprintf(os.Stderr, "ltm: ebpf collector attached %d tracepoints, skipped %d\n", attached, skipped)
