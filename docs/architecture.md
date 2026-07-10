@@ -4,6 +4,9 @@ One contract: `storage.Event`. Collectors emit events; the store persists them;
 diff/query/agent read them back. Nothing downstream of the store knows how an
 event was collected.
 
+Related: [CLI](cli.md) · [querying](querying.md) · [recording](recording.md) ·
+[security](security.md)
+
 ## Pipeline
 
 ```

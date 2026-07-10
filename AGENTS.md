@@ -1,7 +1,7 @@
 # AGENTS.md
 
-Contributor guide for `ltm`. User-facing overview: `README.md`. Pipeline:
-`docs/architecture.md`. Privileges/data: `docs/security.md`.
+Contributor guide for `ltm`. User overview: `README.md`. Detailed docs:
+`docs/` (index, CLI, querying, recording, architecture, security).
 
 ## Layout
 
@@ -17,7 +17,7 @@ internal/
   diff/            time-window machine-state diff
   query/           deterministic NL templates
 tests/             integration.sh (Linux + root)
-docs/              architecture, security
+docs/              README index + cli, querying, recording, architecture, security
 ```
 
 All implementation under `internal/`. Do not add packages at the repo root.

@@ -1,5 +1,8 @@
 # Security
 
+Related: [recording](recording.md) · [querying](querying.md) ·
+[architecture](architecture.md)
+
 ## Privileges
 
 | Action | Needs |

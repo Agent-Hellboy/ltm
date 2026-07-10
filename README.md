@@ -83,4 +83,6 @@ make integration             # real eBPF recording; Linux + root
 
 Layout: `cmd/ltm` entrypoint; everything else under `internal/`
 (`cli`, `daemon`, `collector`, `ebpf`, `storage`, `agent`, `diff`, `query`).
-See `docs/architecture.md` and `docs/security.md`. Contributor rules: `AGENTS.md`.
+
+Docs: [`docs/`](docs/) (CLI, querying, recording, architecture, security).
+Contributor rules: [`AGENTS.md`](AGENTS.md).
