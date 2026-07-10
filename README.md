@@ -1,13 +1,15 @@
 # ltm
 
-`ltm` is a machine-history debugger for Linux. It records process, file, network, memory, and block-I/O activity via eBPF, then lets you query the timeline of what happened — for answering "what broke and why" and for post-incident forensics.
+Machine-history debugger for Linux. Records process, file, network, memory, and
+block I/O via eBPF, stores metadata in SQLite, and answers timeline / diff /
+plain-English / SQL questions about what happened on the box.
 
 ## Quick start
 
 ```bash
 go build -o bin/ltm ./cmd/ltm
 
-sudo ./bin/ltm start                       # record (eBPF; needs root, Linux only)
+sudo ./bin/ltm start                       # record (eBPF; root, Linux/x86_64)
 ./bin/ltm timeline --since 5m
 ./bin/ltm watch                            # live tail; Ctrl-C to stop
 ./bin/ltm diff --from 10m --to now
@@ -15,54 +17,70 @@ sudo ./bin/ltm start                       # record (eBPF; needs root, Linux onl
 sudo ./bin/ltm stop
 ```
 
-Recording needs root (or `CAP_BPF` + `CAP_PERFMON`); querying doesn't. No live host? `ltm benchmark --count 1000` seeds a database with synthetic events.
+Recording needs root (or `CAP_BPF` + `CAP_PERFMON`). Querying does not.
+Without a live host: `ltm benchmark --count 1000` seeds synthetic events.
+
+Global flags go **before** the subcommand (`ltm --db /tmp/ltm.db status`).
+Defaults: DB `~/.local/share/ltm/ltm.db`, PID `~/.local/run/ltm.pid`.
+Add `--json` to any read command for machine-readable output.
 
 ## Commands
 
-| Command | Description |
+| Command | What it does |
 |---|---|
-| `start` / `stop` / `status` | control and inspect the recorder |
-| `timeline` | filter events by `--pid --uid --comm --category --action --path --exe --since --until --limit` (repeatable; `--path`/`--exe` take SQL `LIKE`) |
-| `watch` | live tail of new events (`--interval --since --category --comm --pid`) |
+| `start` / `stop` / `status` | control the recorder |
+| `timeline` | filter by `--pid --uid --comm --category --action --path --exe --since --until --limit` (repeatable; `--path`/`--exe` are SQL `LIKE`) |
+| `watch` | live tail (`--interval --since --category --comm --pid`) |
 | `diff --from --to` | machine-state changes between two times |
-| `query "<question>"` | plain-English query (see below) |
-| `query sql "<SELECT>"` | arbitrary read-only SQL; no arg prints the schema (`ltm sql` for short) |
-| `prune --older-than 720h` | drop old events and `VACUUM` |
+| `query "<question>"` | plain English (templates, or an agent → SQL) |
+| `query sql ["<SELECT>"]` | read-only SQL; no arg prints the schema (`ltm sql` works too) |
+| `prune --older-than 720h` | drop old rows and `VACUUM` |
+| `benchmark --count N` | write N synthetic events (no eBPF) |
 | `version` | build version, commit, platform |
 
-Add `--json` to any read command for machine-readable output.
+## Storage and querying
 
-## Querying
-
-Events live in one SQLite database (`~/.local/share/ltm/ltm.db`), written in WAL mode by the recorder. Every read command opens it read-only (`PRAGMA query_only=ON`), so queries never contend with the writer or mutate the log.
-
-`ltm query "<plain English>"` can hand the question to a locally installed coding agent that writes the SQL for you:
+One SQLite database, WAL writer held by the daemon. Every read path opens
+read-only (`PRAGMA query_only=ON`) — queries never contend with the writer or
+mutate the log. Metadata only; no file contents.
 
 ```bash
 export LTM_AGENT=claude   # or codex, cursor, gemini, auto, or a custom command
 ltm query "which process wrote to files the most today?"
 ```
 
-The generated SQL is printed before it runs, executes on the read-only connection, and is rejected unless it's a single `SELECT`. With no agent configured (or on failure), `query` falls back to built-in templates.
+Agent SQL is printed, then run on the read-only connection, and rejected unless
+it is a single `SELECT`. No agent (or agent failure) → built-in templates.
 
-## eBPF coverage
+## What gets recorded
 
-~60 tracepoints across **process** (exec, exit, fork, clone, kill), **file** (open/close, read/write, rename, unlink, link, symlink, mkdir, rmdir, chmod, chown, stat, access, truncate, dup, pipe, …), **memory** (mmap, munmap, mprotect), **network** (socket, connect, bind, listen, accept, send/recv, shutdown), and **block** (`block_rq_issue`). BPF-side filters skip `/proc`, `/sys`, `/dev` and the daemon's own PID. See `internal/ebpf/tracepoints_linux.go` for the full list; rebuild the embedded object with `make ebpf` after editing `collector.bpf.c`.
+~60 tracepoints: **process** (exec, exit, fork, clone, kill), **file**
+(open/close, read/write, rename, unlink, link, symlink, mkdir, rmdir, chmod,
+chown, stat, access, truncate, dup, pipe, …), **memory** (mmap, munmap,
+mprotect), **network** (socket, connect, bind, listen, accept, send/recv,
+shutdown), **block** (`block_rq_issue`).
 
-The recorder stores metadata only — no file contents.
+BPF skips `/proc`, `/sys`, `/dev` and the daemon's own PID. Full list:
+`internal/ebpf/tracepoints_linux.go`. After editing `collector.bpf.c`, rebuild
+with `make ebpf`.
 
-### Known limitations
+### Limitations
 
-- **x86_64 only** for recording — the BPF program is built `-D__TARGET_ARCH_x86` (see issue https://github.com/Agent-Hellboy/ltm/issues/2). Query features work anywhere.
-- **IPv4 only** — AF_INET6 connects/binds are recorded as events but without the address decoded.
-- **Read/write byte counts** are the syscall's *requested* size (read at `sys_enter`), so short/failed I/O over-counts; `readv`/`writev`/`sendmsg`/`recvmsg` report `0` bytes.
-- **fd→path resolution** covers fds ≤ 1024 and can misattribute after heavy PID reuse; events for higher fds are recorded without a path.
+- **x86_64 recording only** — BPF is built `-D__TARGET_ARCH_x86`
+  ([#2](https://github.com/Agent-Hellboy/ltm/issues/2)). Query works anywhere.
+- **IPv4 addresses only** — IPv6 connects/binds are stored without a decoded address.
+- **Byte counts** are the syscall's *requested* size (enter probe); short/failed
+  I/O over-counts; `readv`/`writev`/`sendmsg`/`recvmsg` report `0`.
+- **fd→path** covers fds ≤ 1024 and can misattribute after heavy PID reuse;
+  higher fds are recorded without a path.
 
 ## Development
 
 ```bash
-go test ./...                # unit tests (any OS)
-make integration             # records real activity via eBPF; needs Linux + root
+go test ./...                # any OS
+make integration             # real eBPF recording; Linux + root
 ```
 
-Layout: `cmd/ltm` (entrypoint); `internal/` → `cli`, `daemon`, `collector`, `ebpf`, `storage`, `diff`, `query`. See `docs/` for architecture and security notes.
+Layout: `cmd/ltm` entrypoint; everything else under `internal/`
+(`cli`, `daemon`, `collector`, `ebpf`, `storage`, `agent`, `diff`, `query`).
+See `docs/architecture.md` and `docs/security.md`. Contributor rules: `AGENTS.md`.

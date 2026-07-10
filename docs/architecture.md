@@ -1,36 +1,49 @@
 # Architecture
 
-Everything is organized around one narrow contract: `storage.Event`. Collectors
-produce events; the store persists them; the diff and query engines read them
-back. Nothing downstream of the store knows how events were collected.
+One contract: `storage.Event`. Collectors emit events; the store persists them;
+diff/query/agent read them back. Nothing downstream of the store knows how an
+event was collected.
 
 ## Pipeline
 
 ```
 eBPF tracepoints ──▶ ebpf.RealCollector ──▶ collector ──▶ daemon.flushLoop ──▶ storage (SQLite)
-                     (kernel → Event)      (ignore +      (batches into        (WAL writer)
-                                            buffering)     transactions)
+                     kernel → Event         ignore +       batch TX              single WAL writer
+                                            buffer + drop
 ```
 
-1. `internal/ebpf` attaches syscall/sched/block tracepoints and converts each
-   kernel record into a `storage.Event` (Linux only; a stub errors elsewhere).
-2. `internal/collector` drops ignored paths (`/proc`, `/sys`, `/dev`, caches)
-   and buffers, counting events shed under backpressure.
-3. `internal/daemon` batches events and writes each batch in one transaction;
-   on shutdown it drains the buffer and flushes with a fresh context.
-4. `internal/storage` owns the SQLite database. The daemon holds the single
-   WAL writer; every read path opens read-only with `PRAGMA query_only=ON`.
+| Stage | Package | Role |
+|---|---|---|
+| Capture | `internal/ebpf` | Attach syscall/sched/block tracepoints; map each kernel record to `storage.Event`. Linux only; non-Linux stub errors. BPF object is embedded (`collector_bpfel.o`); rebuild with `make ebpf`. |
+| Filter | `internal/collector` | Drop ignored path prefixes (`/proc`, `/sys`, `/dev`, caches, extras via `--ignore-path`). Bounded channel; overflow increments a dropped counter. |
+| Batch | `internal/daemon` | `flushLoop` writes batches in one transaction. On shutdown: stop sources, drain the buffer, flush with a **fresh** context (the cancelled run ctx must not abort the final write), then return so the caller can close the store. |
+| Store | `internal/storage` | SQLite (`modernc.org/sqlite`, no CGo). Daemon holds the only writer (`Open`, WAL, `MaxOpenConns(1)`). Every read path uses `OpenReadOnly` + `PRAGMA query_only=ON`. |
+
+`Event.DroppedBefore` attributes kernel perf-buffer loss and collector overflow
+to the next persisted row (additive; totals are `SUM(dropped_before)`).
 
 ## Reading
 
-- `internal/diff` summarizes machine-state change between two timestamps.
-- `internal/query` answers structured filters, raw read-only SQL, and
-  plain-English questions — the last optionally delegated to a coding-agent CLI
-  (`internal/agent`) that emits SQL, always validated down to a single `SELECT`.
+| Package | Role |
+|---|---|
+| `internal/diff` | Machine-state delta between two timestamps (processes, file mods, hot writers, sockets). |
+| `internal/query` | Deterministic templates for common plain-English questions. |
+| `internal/agent` | Optional external CLI (`LTM_AGENT` / `--agent`) that emits SQL; `ExtractSQL` keeps a single `SELECT`; always executed via read-only `RawSQL`. Failure → warn and fall back to templates. |
+| CLI | `timeline` / `watch` / `query sql` go straight through `storage.Filter`, `EventsAfterID`, or `RawSQL`. |
 
-## Notes
+`ltm benchmark` writes synthetic events through the store only — there is no
+simulated collector.
 
-- `ltm benchmark` generates synthetic events to exercise the store without
-  recording; there is no simulated collector.
-- The BPF object is compiled ahead of time and embedded
-  (`internal/ebpf/collector_bpfel.o`); rebuild it with `make ebpf`.
+## Package map
+
+```text
+cmd/ltm          thin main → cli.Execute
+internal/cli     flags, subcommands, daemon spawn (Setsid)
+internal/daemon  service lifecycle + flushLoop
+internal/collector  ignore rules + fan-in buffer
+internal/ebpf    BPF C, embedded .o, RealCollector
+internal/storage Event, Filter, SQLite
+internal/diff    time-window summary
+internal/query   NL templates
+internal/agent   NL → SQL bridge
+```
