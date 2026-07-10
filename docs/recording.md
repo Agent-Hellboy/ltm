@@ -32,21 +32,23 @@ Optional tracepoints (e.g. `clone3`, `mkdir`, `rmdir`, `block_rq_issue`,
 
 ## Ignore paths
 
-Dropped in BPF and again in userspace (`internal/collector`):
+**BPF** (`collector.bpf.c`) drops only `/proc`, `/sys`, `/dev` (and the daemon's
+own PID).
 
-| Default | Reason |
+**Userspace** (`internal/collector`) drops those again, plus package-manager
+caches and CLI defaults:
+
+| Prefix | Where |
 |---|---|
-| `/proc`, `/sys`, `/dev` | pseudo-fs noise / feedback |
-| `$HOME/.cache` | cache churn |
-| `$HOME/Library/Caches` | macOS (query hosts) |
+| `/proc`, `/sys`, `/dev` | BPF + userspace |
+| `/var/cache/apt`, `/var/cache/dnf`, `/var/cache/pacman` | userspace |
+| `$HOME/.cache`, `$HOME/Library/Caches` | userspace (CLI defaults) |
 
 Add more at start time:
 
 ```bash
 sudo ltm --ignore-path /var/cache --ignore-path /tmp/scratch start
 ```
-
-The daemon's own PID is excluded in BPF to avoid recording itself.
 
 ## Rebuild BPF
 

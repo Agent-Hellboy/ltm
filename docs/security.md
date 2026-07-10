@@ -18,9 +18,13 @@ recorder survives the launching shell.
 Metadata only: pid/uid/comm/exe, paths, addresses/ports, category/action,
 timestamps, small JSON `metadata`/`raw`. **No file contents, no payloads.**
 
-Default ignore prefixes (BPF + userspace): `/proc`, `/sys`, `/dev`,
-`$HOME/.cache` (and `$HOME/Library/Caches` on macOS query hosts). Add more with
-`--ignore-path` (repeatable). Changing defaults → update this file.
+Ignore prefixes (recorder only):
+
+- **BPF:** `/proc`, `/sys`, `/dev` (plus the daemon PID)
+- **Userspace:** the above, plus `/var/cache/apt`, `/var/cache/dnf`,
+  `/var/cache/pacman`, `$HOME/.cache`, `$HOME/Library/Caches`
+
+Add more with `--ignore-path` (repeatable). Changing defaults → update this file.
 
 ## Write isolation
 

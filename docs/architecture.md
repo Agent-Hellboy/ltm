@@ -18,7 +18,7 @@ eBPF tracepoints ──▶ ebpf.RealCollector ──▶ collector ──▶ daem
 | Stage | Package | Role |
 |---|---|---|
 | Capture | `internal/ebpf` | Attach syscall/sched/block tracepoints; map each kernel record to `storage.Event`. Linux only; non-Linux stub errors. BPF object is embedded (`collector_bpfel.o`); rebuild with `make ebpf`. |
-| Filter | `internal/collector` | Drop ignored path prefixes (`/proc`, `/sys`, `/dev`, caches, extras via `--ignore-path`). Bounded channel; overflow increments a dropped counter. |
+| Filter | `internal/collector` | Drop ignored path prefixes (userspace list; BPF only filters `/proc`/`/sys`/`/dev`). Bounded channel; overflow increments a dropped counter. |
 | Batch | `internal/daemon` | `flushLoop` writes batches in one transaction. On shutdown: stop sources, drain the buffer, flush with a **fresh** context (the cancelled run ctx must not abort the final write), then return so the caller can close the store. |
 | Store | `internal/storage` | SQLite (`modernc.org/sqlite`, no CGo). Daemon holds the only writer (`Open`, WAL, `MaxOpenConns(1)`). Every read path uses `OpenReadOnly` + `PRAGMA query_only=ON`. |
 

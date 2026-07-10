@@ -79,7 +79,8 @@ Summarize machine-state change in `[from, to]`:
 - new / exited processes (creation deduped by pid)
 - modified files (write, rename, chmod, chown, mkdir, truncate — not reads)
 - deleted files (unlink, rmdir)
-- new listeners, outbound connects
+- new listeners (`network:listen` and `network:bind`)
+- outbound connections (`network:connect` and `network:send`)
 - hot writers (write actions only)
 - restarts
 
