@@ -48,6 +48,11 @@ func TestExtractSQL(t *testing.T) {
 			want: "WITH recent AS (SELECT * FROM events) SELECT comm FROM recent",
 		},
 		{
+			name: "with clause containing write word in string",
+			in:   "WITH deleted AS (SELECT 'delete' AS action) SELECT action FROM deleted",
+			want: "WITH deleted AS (SELECT 'delete' AS action) SELECT action FROM deleted",
+		},
+		{
 			name:    "no sql at all",
 			in:      "I cannot answer that question.",
 			wantErr: true,
@@ -65,6 +70,31 @@ func TestExtractSQL(t *testing.T) {
 		{
 			name:    "mutating verb hidden in WITH cte",
 			in:      "WITH x AS (SELECT 1) DELETE FROM events",
+			wantErr: true,
+		},
+		{
+			name: "write word in string literal",
+			in:   "SELECT path FROM events WHERE action = 'delete'",
+			want: "SELECT path FROM events WHERE action = 'delete'",
+		},
+		{
+			name: "read only function with write verb name",
+			in:   "SELECT replace(comm, 'a', 'b') FROM events",
+			want: "SELECT replace(comm, 'a', 'b') FROM events",
+		},
+		{
+			name: "semicolon in string literal",
+			in:   "SELECT ';' AS semicolon FROM events",
+			want: "SELECT ';' AS semicolon FROM events",
+		},
+		{
+			name: "semicolon in line comment",
+			in:   "SELECT count(*) FROM events -- ; ignored in comment",
+			want: "SELECT count(*) FROM events -- ; ignored in comment",
+		},
+		{
+			name:    "with update main statement",
+			in:      "WITH x AS (SELECT 1) UPDATE events SET comm = 'x'",
 			wantErr: true,
 		},
 	}

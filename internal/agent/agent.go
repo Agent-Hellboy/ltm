@@ -106,10 +106,6 @@ Question: ` + question
 
 var reSQLStart = regexp.MustCompile(`(?is)\b(select|with)\b`)
 
-// reWriteVerb catches mutating statements that could otherwise ride inside a
-// `WITH ... ` common-table expression (e.g. `WITH x AS (...) DELETE ...`).
-var reWriteVerb = regexp.MustCompile(`(?i)\b(insert|update|delete|drop|alter|create|replace|truncate|attach|detach|reindex|vacuum|pragma)\b`)
-
 // ExtractSQL pulls a single SELECT statement out of agent output, tolerating
 // markdown fences and surrounding prose, and rejects anything that is not a
 // SELECT / WITH ... SELECT.
@@ -137,14 +133,168 @@ func ExtractSQL(out string) (string, error) {
 	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
 		return "", fmt.Errorf("agent output is not a SELECT statement: %.200s", sql)
 	}
-	if strings.ContainsRune(sql, ';') {
+	if hasStatementSeparator(sql) {
 		return "", fmt.Errorf("agent output contains multiple statements: %.200s", sql)
 	}
-	// Defense in depth against a mutating verb hidden inside a WITH CTE; the
-	// read-only connection would reject it anyway, but this keeps the promise
-	// that only SELECTs run.
-	if reWriteVerb.MatchString(sql) {
+	if !isSelectStatement(sql) {
 		return "", fmt.Errorf("agent output contains a non-SELECT statement: %.200s", sql)
 	}
 	return sql, nil
+}
+
+func hasStatementSeparator(sql string) bool {
+	for i := 0; i < len(sql); {
+		switch sql[i] {
+		case '\'':
+			i = skipQuoted(sql, i, '\'')
+		case '"':
+			i = skipQuoted(sql, i, '"')
+		case '[':
+			i = skipBracketedIdentifier(sql, i)
+		case '-':
+			if i+1 < len(sql) && sql[i+1] == '-' {
+				i = skipLineComment(sql, i+2)
+			} else {
+				i++
+			}
+		case '/':
+			if i+1 < len(sql) && sql[i+1] == '*' {
+				i = skipBlockComment(sql, i+2)
+			} else {
+				i++
+			}
+		case ';':
+			return true
+		default:
+			i++
+		}
+	}
+	return false
+}
+
+func isSelectStatement(sql string) bool {
+	keywords := topLevelKeywords(sql)
+	if len(keywords) == 0 {
+		return false
+	}
+	switch keywords[0] {
+	case "SELECT":
+		return true
+	case "WITH":
+		for _, keyword := range keywords[1:] {
+			if isStatementStarter(keyword) {
+				return keyword == "SELECT"
+			}
+		}
+	}
+	return false
+}
+
+func isStatementStarter(keyword string) bool {
+	switch keyword {
+	case "SELECT", "INSERT", "UPDATE", "DELETE", "REPLACE":
+		return true
+	default:
+		return false
+	}
+}
+
+func topLevelKeywords(sql string) []string {
+	var out []string
+	depth := 0
+	for i := 0; i < len(sql); {
+		switch sql[i] {
+		case '\'':
+			i = skipQuoted(sql, i, '\'')
+		case '"':
+			i = skipQuoted(sql, i, '"')
+		case '[':
+			i = skipBracketedIdentifier(sql, i)
+		case '-':
+			if i+1 < len(sql) && sql[i+1] == '-' {
+				i = skipLineComment(sql, i+2)
+			} else {
+				i++
+			}
+		case '/':
+			if i+1 < len(sql) && sql[i+1] == '*' {
+				i = skipBlockComment(sql, i+2)
+			} else {
+				i++
+			}
+		case '(':
+			depth++
+			i++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			i++
+		default:
+			if depth == 0 && isIdentStart(sql[i]) {
+				start := i
+				i++
+				for i < len(sql) && isIdentPart(sql[i]) {
+					i++
+				}
+				out = append(out, strings.ToUpper(sql[start:i]))
+				continue
+			}
+			i++
+		}
+	}
+	return out
+}
+
+func skipQuoted(sql string, start int, quote byte) int {
+	i := start + 1
+	for i < len(sql) {
+		if sql[i] == quote {
+			if i+1 < len(sql) && sql[i+1] == quote {
+				i += 2
+				continue
+			}
+			return i + 1
+		}
+		i++
+	}
+	return len(sql)
+}
+
+func skipBracketedIdentifier(sql string, start int) int {
+	i := start + 1
+	for i < len(sql) {
+		if sql[i] == ']' {
+			return i + 1
+		}
+		i++
+	}
+	return len(sql)
+}
+
+func skipLineComment(sql string, start int) int {
+	i := start
+	for i < len(sql) && sql[i] != '\n' {
+		i++
+	}
+	return i
+}
+
+func skipBlockComment(sql string, start int) int {
+	i := start
+	for i+1 < len(sql) {
+		if sql[i] == '*' && sql[i+1] == '/' {
+			return i + 2
+		}
+		i++
+	}
+	return len(sql)
+}
+
+func isIdentStart(b byte) bool {
+	return b == '_' || ('A' <= b && b <= 'Z') || ('a' <= b && b <= 'z')
+}
+
+func isIdentPart(b byte) bool {
+	return isIdentStart(b) || ('0' <= b && b <= '9')
 }

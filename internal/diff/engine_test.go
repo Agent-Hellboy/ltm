@@ -81,7 +81,7 @@ func TestDiffEngine(t *testing.T) {
 			Timestamp:     base.Add(6 * time.Minute),
 			Category:      "process",
 			Action:        "exec",
-			PID:           1001,
+			PID:           1004,
 			PPID:          1,
 			UID:           0,
 			Comm:          "nginx",
@@ -123,6 +123,9 @@ func TestDiffEngine(t *testing.T) {
 	}
 	if len(report.Restarts) == 0 {
 		t.Fatalf("expected restart detection")
+	}
+	if report.Restarts[0].PID != 1004 {
+		t.Fatalf("restart pid = %d, want new exec pid 1004", report.Restarts[0].PID)
 	}
 	if len(report.DeletedFiles) == 0 {
 		t.Fatalf("expected rmdir to count as a deleted file")

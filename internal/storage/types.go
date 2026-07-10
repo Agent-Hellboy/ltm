@@ -25,7 +25,7 @@ const SchemaDoc = `Table: events (one row per collected event)
   local_addr, local_port, remote_addr, remote_port, remote_host
   target_pid     INTEGER
   exit_code      INTEGER
-  dropped_before INTEGER  dropped-event counter as of this row
+  dropped_before INTEGER  events lost immediately before this row
   metadata       TEXT     JSON object; query with json_extract(metadata, '$.key')
   raw            TEXT     JSON object; raw source event
 

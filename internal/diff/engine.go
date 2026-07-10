@@ -92,7 +92,7 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 					Action:    ev.Action,
 				})
 			}
-			if priorExit, ok := lastExit[pidKey(ev)]; ok && ev.Timestamp.After(priorExit.Timestamp) {
+			if priorExit, ok := lastExit[restartKey(ev)]; ok && ev.Timestamp.After(priorExit.Timestamp) {
 				report.Restarts = append(report.Restarts, ProcessRestart{
 					Comm:      ev.Comm,
 					PID:       ev.PID,
@@ -107,7 +107,9 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 				Path:      ev.Exe,
 				Action:    ev.Action,
 			})
-			lastExit[pidKey(ev)] = ev
+			if key := restartKey(ev); key != "" {
+				lastExit[key] = ev
+			}
 		case "file:write", "file:rename", "file:truncate", "file:chmod", "file:chown", "file:mkdir":
 			// Reads are not modifications and are deliberately excluded.
 			report.ModifiedFiles = append(report.ModifiedFiles, FileChange{
@@ -159,8 +161,14 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 	return report, nil
 }
 
-func pidKey(ev storage.Event) string {
-	return ev.Comm + ":" + strconv.Itoa(ev.PID)
+func restartKey(ev storage.Event) string {
+	if strings.TrimSpace(ev.Comm) != "" {
+		return ev.Comm
+	}
+	if ev.PID != 0 {
+		return strconv.Itoa(ev.PID)
+	}
+	return ""
 }
 
 func firstNonEmpty(items ...string) string {

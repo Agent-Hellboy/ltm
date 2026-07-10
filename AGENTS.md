@@ -141,5 +141,5 @@ Query-only flow without recording (any OS): seed with `./bin/ltm benchmark --cou
 ## Related docs
 
 - `README.md` — user-facing overview and examples
-- `docs/architecture.md` — pipeline and phase notes
+- `docs/architecture.md` — event pipeline and component boundaries
 - `docs/security.md` — privileges and data handling

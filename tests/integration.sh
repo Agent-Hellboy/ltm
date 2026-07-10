@@ -11,6 +11,8 @@ trap 'sudo rm -rf "${work_dir}"' EXIT
 ltm="${work_dir}/ltm"
 db="${work_dir}/ltm.db"
 pid_file="${work_dir}/ltm.pid"
+ignored_dir="${work_dir}/ignored"
+mkdir -p "${ignored_dir}"
 
 go build -o "${ltm}" ./cmd/ltm
 
@@ -18,7 +20,7 @@ go build -o "${ltm}" ./cmd/ltm
 
 # Start recording (eBPF; needs root). start forks the daemon and writes the
 # pidfile; the daemon's attach summary prints to this script's output.
-sudo "${ltm}" --db "${db}" --pidfile "${pid_file}" start
+sudo "${ltm}" --db "${db}" --pidfile "${pid_file}" --ignore-path "${ignored_dir}" start
 sleep 3
 if ! sudo "${ltm}" --db "${db}" --pidfile "${pid_file}" status | grep -q "alive=true"; then
   echo "daemon failed to start (eBPF unsupported on this host?)" >&2
@@ -31,6 +33,9 @@ echo "config change" >"/tmp/${mark}.conf"
 cat "/tmp/${mark}.conf" >/dev/null
 mv "/tmp/${mark}.conf" "/tmp/${mark}.renamed.conf"
 rm -f "/tmp/${mark}.renamed.conf"
+echo "ignored" >"${ignored_dir}/${mark}.ignored"
+cat "${ignored_dir}/${mark}.ignored" >/dev/null
+rm -f "${ignored_dir}/${mark}.ignored"
 id >/dev/null
 getent hosts one.one.one.one >/dev/null 2>&1 || true
 sleep 3
@@ -49,6 +54,11 @@ if [ "${count}" -le 0 ]; then
 fi
 
 sudo "${ltm}" --db "${db}" query sql "SELECT category, count(*) n FROM events GROUP BY category ORDER BY n DESC"
+ignored_count="$(sudo "${ltm}" --db "${db}" query sql "SELECT count(*) FROM events WHERE path LIKE '${ignored_dir}/%' OR old_path LIKE '${ignored_dir}/%'" | tail -1)"
+if [ "${ignored_count}" -ne 0 ]; then
+  echo "ignore-path forwarding failed: captured ${ignored_count} events under ${ignored_dir}" >&2
+  exit 1
+fi
 sudo "${ltm}" --db "${db}" timeline --since 5m --category process --limit 5
 sudo "${ltm}" --db "${db}" diff --from 5m --to now >"${work_dir}/diff.out"
 head -2 "${work_dir}/diff.out"

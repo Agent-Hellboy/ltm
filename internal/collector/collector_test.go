@@ -70,14 +70,17 @@ func TestCollectorFiltersIgnoredPaths(t *testing.T) {
 }
 
 func TestShouldIgnore(t *testing.T) {
-	c := New(Config{IgnorePaths: []string{"/home/u/.cache"}})
+	c := New(Config{IgnorePaths: []string{"/home/u/.cache/", "  /tmp/noisy  "}})
 	cases := map[string]bool{
 		"":                      false,
 		"/etc/nginx/nginx.conf": false,
+		"/procession/status":    false,
 		"/proc/1/status":        true,
 		"/sys/kernel/debug":     true,
 		"/dev/null":             true,
 		"/home/u/.cache/x":      true,
+		"/home/u/.cache-bak/x":  false,
+		"/tmp/noisy/event":      true,
 	}
 	for path, want := range cases {
 		if got := c.shouldIgnore(path); got != want {

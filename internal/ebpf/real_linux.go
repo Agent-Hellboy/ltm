@@ -12,7 +12,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	_ "embed"
@@ -127,15 +126,6 @@ func (r RealCollector) Run(ctx context.Context, out chan<- storage.Event) error 
 	defer reader.Close()
 
 	var dropped uint64
-	var sendMu sync.Mutex
-	send := func(ev storage.Event) {
-		sendMu.Lock()
-		defer sendMu.Unlock()
-		select {
-		case out <- ev:
-		default:
-		}
-	}
 
 	go func() {
 		<-ctx.Done()
@@ -160,7 +150,11 @@ func (r RealCollector) Run(ctx context.Context, out chan<- storage.Event) error 
 		}
 		ev := convertKernelEvent(bootTime, ke, dropped)
 		dropped = 0
-		send(ev)
+		select {
+		case out <- ev:
+		case <-ctx.Done():
+			return nil
+		}
 	}
 }
 

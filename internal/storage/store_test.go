@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -204,6 +205,9 @@ func TestOpenReadOnlyBlocksWrites(t *testing.T) {
 	if _, err := writer.InsertEvents(context.Background(), GenerateDemoEvents(base, 3)); err != nil {
 		t.Fatalf("insert events: %v", err)
 	}
+	if _, _, err := writer.RawSQL(context.Background(), "SELECT count(*) FROM events"); err == nil {
+		t.Fatal("expected RawSQL to reject writable store")
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
@@ -228,6 +232,20 @@ func TestOpenReadOnlyBlocksWrites(t *testing.T) {
 	}
 	if len(cols) != 1 || len(rows) != 1 {
 		t.Fatalf("unexpected raw select shape: cols=%v rows=%v", cols, rows)
+	}
+}
+
+func TestOpenEscapesURICharactersInPath(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "ltm?weird#name%.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("open store with URI characters: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("database was not created at literal path %q: %v", path, err)
 	}
 }
 
@@ -271,6 +289,20 @@ func TestStorePrune(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("second prune removed %d, want 0", n)
+	}
+}
+
+func TestGenerateDemoEventsCount(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
+	if got := GenerateDemoEvents(base, 0); len(got) != 0 {
+		t.Fatalf("GenerateDemoEvents count 0 produced %d events, want 0", len(got))
+	}
+	if got := GenerateDemoEvents(base, -1); len(got) != 0 {
+		t.Fatalf("GenerateDemoEvents negative count produced %d events, want 0", len(got))
+	}
+	if got := GenerateDemoEvents(base, 3); len(got) != 3 {
+		t.Fatalf("GenerateDemoEvents count 3 produced %d events, want 3", len(got))
 	}
 }
 

@@ -32,7 +32,7 @@ func New(cfg Config) *Collector {
 		cfg.BufferSize = 1024
 	}
 	base := []string{"/proc", "/sys", "/dev", "/var/cache/apt", "/var/cache/dnf", "/var/cache/pacman"}
-	return &Collector{cfg: cfg, ignoreRules: append(base, cfg.IgnorePaths...)}
+	return &Collector{cfg: cfg, ignoreRules: normalizeIgnoreRules(append(base, cfg.IgnorePaths...))}
 }
 
 func (c *Collector) Stats() Stats {
@@ -105,4 +105,22 @@ func (c *Collector) shouldIgnore(path string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeIgnoreRules(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		path = filepath.Clean(path)
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
+	}
+	return out
 }

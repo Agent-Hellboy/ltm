@@ -93,6 +93,26 @@ func TestWatchStep(t *testing.T) {
 	}
 }
 
+func TestDaemonArgsForwardCustomIgnorePaths(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	cfg.DBPath = "/tmp/ltm.db"
+	cfg.PIDFile = "/tmp/ltm.pid"
+	cfg.IgnorePaths = append(cfg.IgnorePaths, "/tmp/custom", "/var/tmp/noisy")
+
+	args := daemonArgs(cfg)
+	want := []string{
+		"--db", "/tmp/ltm.db",
+		"--pidfile", "/tmp/ltm.pid",
+		"--ignore-path", "/tmp/custom",
+		"--ignore-path", "/var/tmp/noisy",
+		"daemon", "--foreground",
+	}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("daemonArgs = %#v, want %#v", args, want)
+	}
+}
+
 func TestPrintVersion(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer

@@ -175,7 +175,7 @@ func runStart(cfg Config, args []string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, "--db", cfg.DBPath, "--pidfile", cfg.PIDFile, "daemon", "--foreground")
+	cmd := exec.Command(exe, daemonArgs(cfg)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -191,6 +191,29 @@ func runStart(cfg Config, args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "ltm started pid=%d db=%s\n", cmd.Process.Pid, cfg.DBPath)
 	return nil
+}
+
+func daemonArgs(cfg Config) []string {
+	args := []string{"--db", cfg.DBPath, "--pidfile", cfg.PIDFile}
+	for _, path := range customIgnorePaths(cfg.IgnorePaths) {
+		args = append(args, "--ignore-path", path)
+	}
+	return append(args, "daemon", "--foreground")
+}
+
+func customIgnorePaths(paths []string) []string {
+	defaults := defaultConfig().IgnorePaths
+	defaultSet := make(map[string]bool, len(defaults))
+	for _, path := range defaults {
+		defaultSet[path] = true
+	}
+	var out []string
+	for _, path := range paths {
+		if !defaultSet[path] {
+			out = append(out, path)
+		}
+	}
+	return out
 }
 
 func runStop(cfg Config, args []string) error {
@@ -539,6 +562,9 @@ func runBenchmark(cfg Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *count < 0 {
+		return errors.New("benchmark count must be >= 0")
+	}
 	store, err := storage.Open(cfg.DBPath)
 	if err != nil {
 		return err
@@ -551,7 +577,10 @@ func runBenchmark(cfg Config, args []string) error {
 		return err
 	}
 	elapsed := time.Since(start)
-	throughput := float64(len(events)) / elapsed.Seconds()
+	var throughput float64
+	if elapsed > 0 {
+		throughput = float64(len(events)) / elapsed.Seconds()
+	}
 	fmt.Fprintf(os.Stdout, "events/sec=%.0f dropped=%d db_write_latency_ms=%d\n", throughput, stats.Dropped, stats.WriteLatency.Milliseconds())
 	return nil
 }
@@ -878,7 +907,8 @@ func processAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return proc.Signal(syscall.Signal(0)) == nil
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 // signal helpers are split so tests can stub them if needed.

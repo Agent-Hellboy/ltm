@@ -163,17 +163,22 @@ static __always_inline int should_skip(void) {
 	return pid == *self;
 }
 
+static __always_inline int path_boundary(char c) {
+	return c == 0 || c == '/';
+}
+
 static __always_inline int path_ignored_prefix(const char *prefix) {
 	if (prefix[0] != '/') {
 		return 0;
 	}
-	if (prefix[1] == 'p' && prefix[2] == 'r') {
+	if (prefix[1] == 'p' && prefix[2] == 'r' && prefix[3] == 'o' && prefix[4] == 'c' &&
+	    path_boundary(prefix[5])) {
 		return 1;
 	}
-	if (prefix[1] == 's' && prefix[2] == 'y') {
+	if (prefix[1] == 's' && prefix[2] == 'y' && prefix[3] == 's' && path_boundary(prefix[4])) {
 		return 1;
 	}
-	if (prefix[1] == 'd' && prefix[2] == 'e') {
+	if (prefix[1] == 'd' && prefix[2] == 'e' && prefix[3] == 'v' && path_boundary(prefix[4])) {
 		return 1;
 	}
 	return 0;

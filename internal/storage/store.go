@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,11 +107,14 @@ func OpenReadOnly(path string) (*Store, error) {
 }
 
 func dsn(path string, readOnly bool) string {
-	pragmas := "_pragma=busy_timeout(5000)&_pragma=journal_mode(wal)&_pragma=synchronous(normal)"
+	values := url.Values{}
+	values.Add("_pragma", "busy_timeout(5000)")
+	values.Add("_pragma", "journal_mode(wal)")
+	values.Add("_pragma", "synchronous(normal)")
 	if readOnly {
-		pragmas += "&_pragma=query_only(true)"
+		values.Add("_pragma", "query_only(true)")
 	}
-	return "file:" + path + "?" + pragmas
+	return (&url.URL{Scheme: "file", Path: path, RawQuery: values.Encode()}).String()
 }
 
 func (s *Store) Close() error {
@@ -463,6 +467,9 @@ func (s *Store) Prune(ctx context.Context, cutoff time.Time) (int64, error) {
 // rows as generic values, for `ltm sql`. Callers must use a read-only Store
 // (query_only=ON) so writes fail at the SQLite layer.
 func (s *Store) RawSQL(ctx context.Context, query string) ([]string, [][]any, error) {
+	if !s.readOnly {
+		return nil, nil, errors.New("raw SQL requires read-only store")
+	}
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, nil, err
@@ -489,7 +496,7 @@ func (s *Store) RawSQL(ctx context.Context, query string) ([]string, [][]any, er
 
 func GenerateDemoEvents(start time.Time, count int) []Event {
 	if count <= 0 {
-		count = 24
+		return nil
 	}
 	events := make([]Event, 0, count)
 	base := start
