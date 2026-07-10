@@ -145,7 +145,9 @@ static long (*bpf_map_delete_elem)(void *map, const void *key) = (void *)3;
 
 static __always_inline void fill_common(struct event *ev) {
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
-	ev->ts_ns = bpf_ktime_get_ns();
+	// Boot-time clock (includes suspend) so timestamps line up with /proc/stat
+	// btime in userspace; plain ktime (monotonic) drifts across suspend.
+	ev->ts_ns = bpf_ktime_get_boot_ns();
 	ev->pid = pid_tgid >> 32;
 	ev->uid = (bpf_get_current_uid_gid() & 0xffffffff);
 	bpf_get_current_comm(ev->comm, sizeof(ev->comm));
@@ -452,7 +454,8 @@ int trace_sys_enter_kill(struct trace_sys_enter *ctx) {
 
 SEC("tracepoint/syscalls/sys_enter_tgkill")
 int trace_sys_enter_tgkill(struct trace_sys_enter *ctx) {
-	return emit_event(ctx, "process", "kill", 0, 0, 0, (__s32)ctx->args[2], (__u32)ctx->args[3], ctx->id);
+	// tgkill(tgid, tid, sig): target pid is args[1] (tid), signal is args[2].
+	return emit_event(ctx, "process", "kill", 0, 0, 0, (__s32)ctx->args[1], (__u32)ctx->args[2], ctx->id);
 }
 
 SEC("tracepoint/syscalls/sys_enter_open")
@@ -555,7 +558,8 @@ int trace_sys_enter_linkat(struct trace_sys_enter *ctx) {
 
 SEC("tracepoint/syscalls/sys_enter_symlinkat")
 int trace_sys_enter_symlinkat(struct trace_sys_enter *ctx) {
-	return emit_event(ctx, "file", "symlink", (const char *)ctx->args[1], (const char *)ctx->args[0], 0, -1, 0, ctx->id);
+	// symlinkat(target, newdirfd, linkpath): linkpath is args[2], target args[0].
+	return emit_event(ctx, "file", "symlink", (const char *)ctx->args[2], (const char *)ctx->args[0], 0, -1, 0, ctx->id);
 }
 
 SEC("tracepoint/syscalls/sys_enter_mkdirat")
@@ -672,8 +676,9 @@ int trace_sys_enter_copy_file_range(struct trace_sys_enter *ctx) {
 
 SEC("tracepoint/syscalls/sys_enter_splice")
 int trace_sys_enter_splice(struct trace_sys_enter *ctx) {
-	emit_fd_io(ctx, "file", "read", (__u32)ctx->args[0], ctx->args[2], ctx->id);
-	return emit_fd_io(ctx, "file", "write", (__u32)ctx->args[2], ctx->args[2], ctx->id);
+	// splice(fd_in, off_in, fd_out, off_out, len, flags): len is args[4].
+	emit_fd_io(ctx, "file", "read", (__u32)ctx->args[0], ctx->args[4], ctx->id);
+	return emit_fd_io(ctx, "file", "write", (__u32)ctx->args[2], ctx->args[4], ctx->id);
 }
 
 SEC("tracepoint/syscalls/sys_enter_socket")

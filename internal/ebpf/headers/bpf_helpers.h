@@ -29,6 +29,7 @@ static void *(*bpf_map_lookup_elem)(void *map, const void *key) = (void *)1;
 static long (*bpf_map_update_elem)(void *map, const void *key, const void *value, __u64 flags) = (void *)2;
 static long (*bpf_probe_read)(void *dst, __u32 size, const void *unsafe_ptr) = (void *)4;
 static __u64 (*bpf_ktime_get_ns)(void) = (void *)5;
+static __u64 (*bpf_ktime_get_boot_ns)(void) = (void *)125;
 static long (*bpf_get_current_pid_tgid)(void) = (void *)14;
 static long (*bpf_get_current_uid_gid)(void) = (void *)15;
 static long (*bpf_get_current_comm)(void *buf, __u32 size) = (void *)16;

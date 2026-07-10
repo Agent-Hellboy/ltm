@@ -204,6 +204,9 @@ func convertKernelEvent(bootTime time.Time, ke kernelEvent, dropped uint64) stor
 		ev.Exe = ev.Path
 	}
 	if ev.Category == "block" {
+		// For block events ke.Path carries the rwbs flags string, not a real
+		// path — surface it as metadata and keep Path empty.
+		ev.Path = ""
 		ev.Metadata["dev"] = ke.Aux
 		ev.Metadata["nr_sector"] = ke.SyscallNR
 		ev.Metadata["rwbs"] = cstring(ke.Path[:])
@@ -250,9 +253,13 @@ func cstring(b []byte) string {
 	return string(b[:n])
 }
 
+// ipv4String renders an IPv4 address held in a uint32 that was read from the
+// kernel's network-byte-order sin_addr via a little-endian struct decode. The
+// bytes are therefore already in [a,b,c,d] order little-endian, so encode them
+// back out little-endian to recover the original dotted quad.
 func ipv4String(v uint32) string {
 	var b [4]byte
-	binary.BigEndian.PutUint32(b[:], v)
+	binary.LittleEndian.PutUint32(b[:], v)
 	return net.IPv4(b[0], b[1], b[2], b[3]).String()
 }
 
@@ -261,11 +268,19 @@ func readPPID(pid int) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	fields := strings.Fields(string(data))
-	if len(fields) < 4 {
+	// Layout: "pid (comm) state ppid ...". comm can contain spaces and
+	// parentheses, so parse the fixed fields after the LAST ')'.
+	s := string(data)
+	rparen := strings.LastIndexByte(s, ')')
+	if rparen < 0 || rparen+1 >= len(s) {
 		return 0, false
 	}
-	ppid, err := strconv.Atoi(fields[3])
+	fields := strings.Fields(s[rparen+1:])
+	// fields[0]=state, fields[1]=ppid
+	if len(fields) < 2 {
+		return 0, false
+	}
+	ppid, err := strconv.Atoi(fields[1])
 	if err != nil {
 		return 0, false
 	}
