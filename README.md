@@ -53,7 +53,7 @@ The recorder stores metadata only — no file contents.
 
 ### Known limitations
 
-- **x86_64 only** for recording — the BPF program is built `-D__TARGET_ARCH_x86` (see issue #2). Query features work anywhere.
+- **x86_64 only** for recording — the BPF program is built `-D__TARGET_ARCH_x86` (see issue https://github.com/Agent-Hellboy/ltm/issues/2). Query features work anywhere.
 - **IPv4 only** — AF_INET6 connects/binds are recorded as events but without the address decoded.
 - **Read/write byte counts** are the syscall's *requested* size (read at `sys_enter`), so short/failed I/O over-counts; `readv`/`writev`/`sendmsg`/`recvmsg` report `0` bytes.
 - **fd→path resolution** covers fds ≤ 1024 and can misattribute after heavy PID reuse; events for higher fds are recorded without a path.
