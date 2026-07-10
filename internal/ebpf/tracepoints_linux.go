@@ -42,6 +42,8 @@ var collectorTracepoints = []tracepointSpec{
 	{Group: "syscalls", Event: "sys_enter_linkat", Program: "trace_sys_enter_linkat"},
 	{Group: "syscalls", Event: "sys_enter_symlinkat", Program: "trace_sys_enter_symlinkat"},
 	{Group: "syscalls", Event: "sys_enter_mkdirat", Program: "trace_sys_enter_mkdirat"},
+	{Group: "syscalls", Event: "sys_enter_mkdir", Program: "trace_sys_enter_mkdir", Optional: true},
+	{Group: "syscalls", Event: "sys_enter_rmdir", Program: "trace_sys_enter_rmdir", Optional: true},
 	{Group: "syscalls", Event: "sys_enter_readlinkat", Program: "trace_sys_enter_readlinkat"},
 	{Group: "syscalls", Event: "sys_enter_chmod", Program: "trace_sys_enter_chmod"},
 	{Group: "syscalls", Event: "sys_enter_fchmod", Program: "trace_sys_enter_fchmod"},

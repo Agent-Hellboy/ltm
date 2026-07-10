@@ -60,6 +60,11 @@ func defaultConfig() Config {
 func Execute() error {
 	cfg := defaultConfig()
 	args := os.Args[1:]
+	// Handle `-v`/`--version` up front: the global flag parser would otherwise
+	// reject them as undefined flags before dispatch sees them.
+	if len(args) > 0 && (args[0] == "-v" || args[0] == "--version") {
+		return printVersion(os.Stdout, cfg.JSON)
+	}
 	args, err := parseGlobalFlags(args, &cfg)
 	if err != nil {
 		// `-h`/`--help` before a subcommand surfaces as flag.ErrHelp.

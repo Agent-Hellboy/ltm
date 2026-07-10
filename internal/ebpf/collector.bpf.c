@@ -563,6 +563,16 @@ int trace_sys_enter_mkdirat(struct trace_sys_enter *ctx) {
 	return emit_event(ctx, "file", "mkdir", (const char *)ctx->args[1], 0, 0, -1, (__u32)ctx->args[2], ctx->id);
 }
 
+SEC("tracepoint/syscalls/sys_enter_mkdir")
+int trace_sys_enter_mkdir(struct trace_sys_enter *ctx) {
+	return emit_event(ctx, "file", "mkdir", (const char *)ctx->args[0], 0, 0, -1, (__u32)ctx->args[1], ctx->id);
+}
+
+SEC("tracepoint/syscalls/sys_enter_rmdir")
+int trace_sys_enter_rmdir(struct trace_sys_enter *ctx) {
+	return emit_event(ctx, "file", "rmdir", (const char *)ctx->args[0], 0, 0, -1, 0, ctx->id);
+}
+
 SEC("tracepoint/syscalls/sys_enter_readlinkat")
 int trace_sys_enter_readlinkat(struct trace_sys_enter *ctx) {
 	return emit_event(ctx, "file", "readlink", (const char *)ctx->args[1], 0, 0, -1, 0, ctx->id);

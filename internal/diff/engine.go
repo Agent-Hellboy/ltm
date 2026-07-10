@@ -17,16 +17,16 @@ func NewEngine(store *storage.Store) *Engine {
 }
 
 type DiffReport struct {
-	From               time.Time        `json:"from"`
-	To                 time.Time        `json:"to"`
-	NewProcesses       []ProcessChange   `json:"new_processes"`
-	ExitedProcesses    []ProcessChange   `json:"exited_processes"`
-	ModifiedFiles      []FileChange      `json:"modified_files"`
-	DeletedFiles       []FileChange      `json:"deleted_files"`
-	NewListeners       []SocketChange    `json:"new_listeners"`
-	OutboundConnections []SocketChange    `json:"outbound_connections"`
-	HotWriters         []HotWriter       `json:"hot_writers"`
-	Restarts           []ProcessRestart  `json:"restarts"`
+	From                time.Time        `json:"from"`
+	To                  time.Time        `json:"to"`
+	NewProcesses        []ProcessChange  `json:"new_processes"`
+	ExitedProcesses     []ProcessChange  `json:"exited_processes"`
+	ModifiedFiles       []FileChange     `json:"modified_files"`
+	DeletedFiles        []FileChange     `json:"deleted_files"`
+	NewListeners        []SocketChange   `json:"new_listeners"`
+	OutboundConnections []SocketChange   `json:"outbound_connections"`
+	HotWriters          []HotWriter      `json:"hot_writers"`
+	Restarts            []ProcessRestart `json:"restarts"`
 }
 
 type ProcessChange struct {
@@ -108,7 +108,7 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 				Action:    ev.Action,
 			})
 			writes[firstNonEmpty(ev.Path, ev.OldPath)] = append(writes[firstNonEmpty(ev.Path, ev.OldPath)], ev)
-		case "file:unlink":
+		case "file:unlink", "file:rmdir":
 			report.DeletedFiles = append(report.DeletedFiles, FileChange{
 				Timestamp: ev.Timestamp,
 				Path:      ev.Path,

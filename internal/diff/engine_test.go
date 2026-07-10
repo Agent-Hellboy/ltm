@@ -87,6 +87,17 @@ func TestDiffEngine(t *testing.T) {
 			Comm:          "nginx",
 			Exe:           "/usr/sbin/nginx",
 		},
+		{
+			SchemaVersion: storage.SchemaVersion,
+			Timestamp:     base.Add(7 * time.Minute),
+			Category:      "file",
+			Action:        "rmdir",
+			PID:           1003,
+			PPID:          1,
+			UID:           0,
+			Comm:          "rmdir",
+			Path:          "/var/run/nginx",
+		},
 	}
 
 	if _, err := store.InsertEvents(context.Background(), events); err != nil {
@@ -113,5 +124,7 @@ func TestDiffEngine(t *testing.T) {
 	if len(report.Restarts) == 0 {
 		t.Fatalf("expected restart detection")
 	}
+	if len(report.DeletedFiles) == 0 {
+		t.Fatalf("expected rmdir to count as a deleted file")
+	}
 }
-
