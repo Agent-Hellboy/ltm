@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,49 @@ func TestDaemonArgsForwardCustomIgnorePaths(t *testing.T) {
 	}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("daemonArgs = %#v, want %#v", args, want)
+	}
+}
+
+func TestParseGlobalFlagsAfterSubcommand(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+
+	rest, err := parseGlobalFlags([]string{"--db", "/tmp/one.db", "--pidfile", "/tmp/one.pid", "--ignore-path", "/tmp/extra", "query", "hello"}, &cfg)
+	if err != nil {
+		t.Fatalf("parseGlobalFlags: %v", err)
+	}
+
+	if cfg.DBPath != "/tmp/one.db" {
+		t.Fatalf("DBPath = %q, want /tmp/one.db", cfg.DBPath)
+	}
+	if cfg.PIDFile != "/tmp/one.pid" {
+		t.Fatalf("PIDFile = %q, want /tmp/one.pid", cfg.PIDFile)
+	}
+	if !reflect.DeepEqual(rest, []string{"query", "hello"}) {
+		t.Fatalf("rest = %#v, want %#v", rest, []string{"query", "hello"})
+	}
+	if got := cfg.IgnorePaths[len(cfg.IgnorePaths)-1]; got != "/tmp/extra" {
+		t.Fatalf("last ignore path = %q, want /tmp/extra", got)
+	}
+}
+
+func TestParseGlobalFlagsPreservesCommandFlags(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+
+	rest, err := parseGlobalFlags([]string{"--db", "/tmp/one.db", "--foreground", "--json"}, &cfg)
+	if err != nil {
+		t.Fatalf("parseGlobalFlags: %v", err)
+	}
+
+	if cfg.DBPath != "/tmp/one.db" {
+		t.Fatalf("DBPath = %q, want /tmp/one.db", cfg.DBPath)
+	}
+	if !cfg.JSON {
+		t.Fatal("JSON flag was not applied")
+	}
+	if !reflect.DeepEqual(rest, []string{"--foreground"}) {
+		t.Fatalf("rest = %#v, want %#v", rest, []string{"--foreground"})
 	}
 }
 

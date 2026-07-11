@@ -1,25 +1,53 @@
 package cli
 
 import (
-	"flag"
-	"io"
+	"fmt"
 	"strconv"
 	"strings"
 )
 
 func parseGlobalFlags(args []string, cfg *Config) ([]string, error) {
-	fs := flag.NewFlagSet("ltm", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	fs.StringVar(&cfg.DBPath, "db", cfg.DBPath, "storage path")
-	fs.StringVar(&cfg.PIDFile, "pidfile", cfg.PIDFile, "pid file path")
-	fs.BoolVar(&cfg.JSON, "json", false, "json output")
-	ignore := multiStringFlag{values: append([]string{}, cfg.IgnorePaths...)}
-	fs.Var(&ignore, "ignore-path", "path prefix to ignore")
-	if err := fs.Parse(args); err != nil {
-		return nil, err
+	rest := make([]string, 0, len(args))
+	cfg.IgnorePaths = append([]string{}, cfg.IgnorePaths...)
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			rest = append(rest, args[i:]...)
+			return rest, nil
+		case arg == "--json":
+			cfg.JSON = true
+		case arg == "--db":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag needs an argument: %s", arg)
+			}
+			i++
+			cfg.DBPath = args[i]
+		case strings.HasPrefix(arg, "--db="):
+			cfg.DBPath = strings.TrimPrefix(arg, "--db=")
+		case arg == "--pidfile":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag needs an argument: %s", arg)
+			}
+			i++
+			cfg.PIDFile = args[i]
+		case strings.HasPrefix(arg, "--pidfile="):
+			cfg.PIDFile = strings.TrimPrefix(arg, "--pidfile=")
+		case arg == "--ignore-path":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag needs an argument: %s", arg)
+			}
+			i++
+			cfg.IgnorePaths = append(cfg.IgnorePaths, args[i])
+		case strings.HasPrefix(arg, "--ignore-path="):
+			cfg.IgnorePaths = append(cfg.IgnorePaths, strings.TrimPrefix(arg, "--ignore-path="))
+		default:
+			rest = append(rest, arg)
+		}
 	}
-	cfg.IgnorePaths = ignore.values
-	return fs.Args(), nil
+
+	return rest, nil
 }
 
 type multiStringFlag struct {

@@ -102,7 +102,12 @@ func newPassthroughCmd(name, short string, cfg *Config, run func(Config, []strin
 		Short:              short,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(*cfg, args)
+			local := *cfg
+			rest, err := parseGlobalFlags(args, &local)
+			if err != nil {
+				return err
+			}
+			return run(local, rest)
 		},
 	}
 }
