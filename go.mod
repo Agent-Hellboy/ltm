@@ -4,6 +4,7 @@ go 1.25.2
 
 require (
 	github.com/cilium/ebpf v0.20.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.53.0
 )
 

@@ -16,8 +16,8 @@ Without a recorder host, seed data with `ltm benchmark` (see [cli.md](cli.md)).
 
 ## Coverage
 
-Source of truth: `internal/ebpf/tracepoints_linux.go`. Categories and typical
-actions:
+Source of truth: `internal/abi/abi.yaml` (generated runtime table:
+`internal/abi/tracepoints_gen.go`). Categories and typical actions:
 
 | Category | Hooks (summary) | Common `action` values |
 |---|---|---|
@@ -55,12 +55,15 @@ sudo ltm --ignore-path /var/cache --ignore-path /tmp/scratch start
 After editing `internal/ebpf/collector.bpf.c`:
 
 ```bash
-make ebpf          # clang → internal/ebpf/collector_bpfel.o
+make ebpf          # regenerate ABI header, then clang/bpf2go outputs
 go build -o bin/ltm ./cmd/ltm
 ```
 
-The `.o` is checked in and rebuilt in CI. Headers under
-`internal/ebpf/headers/` are minimal stubs, not a full vmlinux/libbpf tree.
+If you changed `internal/abi/abi.yaml` without touching BPF C, run
+`make generate`; run `make ebpf` as well if the tracepoint set or kernel-event
+layout changed. The generated `collector_bpfel.o` and `collector_bpfel.go` are
+checked in and rebuilt in CI. Headers under `internal/ebpf/headers/` are
+minimal stubs, not a full vmlinux/libbpf tree.
 
 ## Limitations
 

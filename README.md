@@ -61,8 +61,10 @@ mprotect), **network** (socket, connect, bind, listen, accept, send/recv,
 shutdown), **block** (`block_rq_issue`).
 
 BPF skips `/proc`, `/sys`, `/dev` and the daemon's own PID. Full list:
-`internal/ebpf/tracepoints_linux.go`. After editing `collector.bpf.c`, rebuild
-with `make ebpf`.
+`internal/abi/tracepoints_gen.go`. After editing `collector.bpf.c`, rebuild
+with `make ebpf`. After editing ABI metadata in `internal/abi/abi.yaml`, run
+`make generate` and then `make ebpf` if the kernel-event layout or tracepoint
+table changed.
 
 ### Limitations
 
@@ -78,11 +80,12 @@ with `make ebpf`.
 
 ```bash
 go test ./...                # any OS
+make generate                # regenerate ABI/schema outputs from abi.yaml
 make integration             # real eBPF recording; Linux + root
 ```
 
 Layout: `cmd/ltm` entrypoint; everything else under `internal/`
-(`cli`, `daemon`, `collector`, `ebpf`, `storage`, `agent`, `diff`, `query`).
+(`abi`, `cli`, `daemon`, `collector`, `ebpf`, `storage`, `agent`, `diff`, `query`).
 
-Docs: [`docs/`](docs/) (CLI, querying, recording, architecture, security).
+Docs: [`docs/`](docs/) (ABI, CLI, querying, recording, architecture, security).
 Contributor rules: [`AGENTS.md`](AGENTS.md).

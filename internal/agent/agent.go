@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode"
 
-	"ltm/internal/storage"
+	"ltm/internal/abi"
 )
 
 // Agent is a resolved external command that can answer a translation prompt.
@@ -94,7 +94,7 @@ func (a *Agent) GenerateSQL(ctx context.Context, question string) (string, error
 func buildPrompt(question string) string {
 	return `Translate the question below into exactly one SQLite SELECT statement over this schema:
 
-` + storage.SchemaDoc + `
+` + abi.SchemaDoc + `
 
 Rules:
 - Output only the SQL statement. No markdown fences, no explanation, no commentary.

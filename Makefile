@@ -1,4 +1,4 @@
-.PHONY: test build ebpf integration
+.PHONY: test build generate ebpf integration
 
 test:
 	go test ./...
@@ -6,10 +6,15 @@ test:
 build:
 	go build -o bin/ltm ./cmd/ltm
 
-ebpf:
-	cd internal/ebpf && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
-		-mllvm -bpf-stack-size=1024 \
-		-c collector.bpf.c -o collector_bpfel.o -I./headers
+# generate compiles abi.yaml into Go + the kernel_event.gen.h header. Pure Go,
+# runs anywhere.
+generate:
+	go generate ./internal/abi/
+
+# ebpf regenerates the header first, then compiles the BPF object and its Go
+# bindings with bpf2go. Requires clang with a bpf target (Linux/CI, not macOS).
+ebpf: generate
+	go generate ./internal/ebpf/
 
 integration:
 	bash tests/integration.sh

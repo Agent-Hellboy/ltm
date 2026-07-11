@@ -13,49 +13,13 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"ltm/internal/abi"
 )
 
-var schemaStatements = []string{
-	`CREATE TABLE IF NOT EXISTS events (
-		id             INTEGER PRIMARY KEY AUTOINCREMENT,
-		ts             INTEGER NOT NULL,
-		category       TEXT NOT NULL DEFAULT '',
-		action         TEXT NOT NULL DEFAULT '',
-		pid            INTEGER NOT NULL DEFAULT 0,
-		ppid           INTEGER NOT NULL DEFAULT 0,
-		uid            INTEGER NOT NULL DEFAULT 0,
-		comm           TEXT NOT NULL DEFAULT '',
-		exe            TEXT NOT NULL DEFAULT '',
-		container_id   TEXT NOT NULL DEFAULT '',
-		cgroup_path    TEXT NOT NULL DEFAULT '',
-		path           TEXT NOT NULL DEFAULT '',
-		old_path       TEXT NOT NULL DEFAULT '',
-		local_addr     TEXT NOT NULL DEFAULT '',
-		local_port     INTEGER NOT NULL DEFAULT 0,
-		remote_addr    TEXT NOT NULL DEFAULT '',
-		remote_port    INTEGER NOT NULL DEFAULT 0,
-		remote_host    TEXT NOT NULL DEFAULT '',
-		target_pid     INTEGER NOT NULL DEFAULT 0,
-		exit_code      INTEGER NOT NULL DEFAULT 0,
-		dropped_before INTEGER NOT NULL DEFAULT 0,
-		metadata       TEXT NOT NULL DEFAULT '{}',
-		raw            TEXT NOT NULL DEFAULT '{}'
-	)`,
-	`CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts)`,
-	`CREATE INDEX IF NOT EXISTS idx_events_pid_ts ON events(pid, ts)`,
-	`CREATE INDEX IF NOT EXISTS idx_events_path ON events(path)`,
-	`CREATE INDEX IF NOT EXISTS idx_events_cat_action_ts ON events(category, action, ts)`,
-}
-
-const eventColumns = `id, ts, category, action, pid, ppid, uid, comm, exe, container_id, cgroup_path, ` +
-	`path, old_path, local_addr, local_port, remote_addr, remote_port, remote_host, target_pid, ` +
-	`exit_code, dropped_before, metadata, raw`
-
-const insertColumns = `ts, category, action, pid, ppid, uid, comm, exe, container_id, cgroup_path, ` +
-	`path, old_path, local_addr, local_port, remote_addr, remote_port, remote_host, target_pid, ` +
-	`exit_code, dropped_before, metadata, raw`
-
-const insertPlaceholders = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`
+// schemaStatements, eventColumns, insertColumns and insertPlaceholders are
+// generated from internal/abi/abi.yaml into schema_gen.go — do not add them
+// here by hand.
 
 type Store struct {
 	db       *sql.DB
@@ -196,7 +160,7 @@ func scanEvent(rows *sql.Rows) (Event, error) {
 	); err != nil {
 		return Event{}, err
 	}
-	ev.SchemaVersion = SchemaVersion
+	ev.SchemaVersion = abi.SchemaVersion
 	ev.Timestamp = time.Unix(0, ts).UTC()
 	if metadata != "" && metadata != "{}" {
 		if err := json.Unmarshal([]byte(metadata), &ev.Metadata); err != nil {
@@ -504,7 +468,7 @@ func GenerateDemoEvents(start time.Time, count int) []Event {
 		switch i % 6 {
 		case 0:
 			events = append(events, Event{
-				SchemaVersion: SchemaVersion,
+				SchemaVersion: abi.SchemaVersion,
 				Timestamp:     ts,
 				Category:      "process",
 				Action:        "exec",
@@ -518,7 +482,7 @@ func GenerateDemoEvents(start time.Time, count int) []Event {
 			})
 		case 1:
 			events = append(events, Event{
-				SchemaVersion: SchemaVersion,
+				SchemaVersion: abi.SchemaVersion,
 				Timestamp:     ts,
 				Category:      "file",
 				Action:        "write",
@@ -531,7 +495,7 @@ func GenerateDemoEvents(start time.Time, count int) []Event {
 			})
 		case 2:
 			events = append(events, Event{
-				SchemaVersion: SchemaVersion,
+				SchemaVersion: abi.SchemaVersion,
 				Timestamp:     ts,
 				Category:      "network",
 				Action:        "listen",
@@ -544,7 +508,7 @@ func GenerateDemoEvents(start time.Time, count int) []Event {
 			})
 		case 3:
 			events = append(events, Event{
-				SchemaVersion: SchemaVersion,
+				SchemaVersion: abi.SchemaVersion,
 				Timestamp:     ts,
 				Category:      "network",
 				Action:        "connect",
@@ -558,7 +522,7 @@ func GenerateDemoEvents(start time.Time, count int) []Event {
 			})
 		case 4:
 			events = append(events, Event{
-				SchemaVersion: SchemaVersion,
+				SchemaVersion: abi.SchemaVersion,
 				Timestamp:     ts,
 				Category:      "file",
 				Action:        "rename",
@@ -571,7 +535,7 @@ func GenerateDemoEvents(start time.Time, count int) []Event {
 			})
 		case 5:
 			events = append(events, Event{
-				SchemaVersion: SchemaVersion,
+				SchemaVersion: abi.SchemaVersion,
 				Timestamp:     ts,
 				Category:      "process",
 				Action:        "exit",

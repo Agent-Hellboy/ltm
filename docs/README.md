@@ -2,6 +2,7 @@
 
 | Page | Contents |
 |---|---|
+| [abi/README.md](abi/README.md) | Stable storage/query ABI reference, including the `events` schema |
 | [architecture.md](architecture.md) | Event pipeline, packages, drop accounting |
 | [cli.md](cli.md) | Commands, flags, time formats, defaults |
 | [querying.md](querying.md) | Timeline filters, NL templates, SQL schema, agents |

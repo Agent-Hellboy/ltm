@@ -1,0 +1,385 @@
+# ABI source of truth — the kernel capture contract and the persisted event
+# schema, in one file. `go generate ./internal/abi/` compiles this into Go:
+#   - tracepoints_gen.go              (CollectorTracepoints)
+#   - schema_gen.go                   (SchemaVersion, SchemaDoc)
+#   - ../storage/schema_gen.go        (DDL + column lists)
+# Never hand-edit those outputs.
+
+tracepoints:
+  - group: sched
+    event: sched_process_fork
+    program: trace_sched_process_fork
+    optional: false
+  - group: sched
+    event: sched_process_exit
+    program: trace_sched_process_exit
+    optional: false
+  - group: block
+    event: block_rq_issue
+    program: trace_block_rq_issue
+    optional: true
+
+  - group: syscalls
+    event: sys_enter_execve
+    program: trace_sys_enter_execve
+    optional: false
+  - group: syscalls
+    event: sys_enter_execveat
+    program: trace_sys_enter_execveat
+    optional: false
+  - group: syscalls
+    event: sys_enter_clone
+    program: trace_sys_enter_clone
+    optional: false
+  - group: syscalls
+    event: sys_enter_clone3
+    program: trace_sys_enter_clone3
+    optional: true
+  - group: syscalls
+    event: sys_enter_kill
+    program: trace_sys_enter_kill
+    optional: false
+  - group: syscalls
+    event: sys_enter_tgkill
+    program: trace_sys_enter_tgkill
+    optional: false
+
+  - group: syscalls
+    event: sys_enter_open
+    program: trace_sys_enter_open
+    optional: false
+  - group: syscalls
+    event: sys_enter_openat
+    program: trace_sys_enter_openat
+    optional: false
+  - group: syscalls
+    event: sys_enter_openat2
+    program: trace_sys_enter_openat2
+    optional: false
+  - group: syscalls
+    event: sys_exit_open
+    program: trace_sys_exit_open
+    optional: false
+  - group: syscalls
+    event: sys_exit_openat
+    program: trace_sys_exit_openat
+    optional: false
+  - group: syscalls
+    event: sys_exit_openat2
+    program: trace_sys_exit_openat2
+    optional: false
+  - group: syscalls
+    event: sys_enter_close
+    program: trace_sys_enter_close
+    optional: false
+  - group: syscalls
+    event: sys_enter_read
+    program: trace_sys_enter_read
+    optional: false
+  - group: syscalls
+    event: sys_enter_pread64
+    program: trace_sys_enter_pread64
+    optional: false
+  - group: syscalls
+    event: sys_enter_write
+    program: trace_sys_enter_write
+    optional: false
+  - group: syscalls
+    event: sys_enter_pwrite64
+    program: trace_sys_enter_pwrite64
+    optional: false
+  - group: syscalls
+    event: sys_enter_readv
+    program: trace_sys_enter_readv
+    optional: false
+  - group: syscalls
+    event: sys_enter_writev
+    program: trace_sys_enter_writev
+    optional: false
+  - group: syscalls
+    event: sys_enter_lseek
+    program: trace_sys_enter_lseek
+    optional: false
+  - group: syscalls
+    event: sys_enter_truncate
+    program: trace_sys_enter_truncate
+    optional: false
+  - group: syscalls
+    event: sys_enter_ftruncate
+    program: trace_sys_enter_ftruncate
+    optional: false
+  - group: syscalls
+    event: sys_enter_unlinkat
+    program: trace_sys_enter_unlinkat
+    optional: false
+  - group: syscalls
+    event: sys_enter_renameat2
+    program: trace_sys_enter_renameat2
+    optional: false
+  - group: syscalls
+    event: sys_enter_linkat
+    program: trace_sys_enter_linkat
+    optional: false
+  - group: syscalls
+    event: sys_enter_symlinkat
+    program: trace_sys_enter_symlinkat
+    optional: false
+  - group: syscalls
+    event: sys_enter_mkdirat
+    program: trace_sys_enter_mkdirat
+    optional: false
+  - group: syscalls
+    event: sys_enter_mkdir
+    program: trace_sys_enter_mkdir
+    optional: true
+  - group: syscalls
+    event: sys_enter_rmdir
+    program: trace_sys_enter_rmdir
+    optional: true
+  - group: syscalls
+    event: sys_enter_readlinkat
+    program: trace_sys_enter_readlinkat
+    optional: false
+  - group: syscalls
+    event: sys_enter_chmod
+    program: trace_sys_enter_chmod
+    optional: false
+  - group: syscalls
+    event: sys_enter_fchmod
+    program: trace_sys_enter_fchmod
+    optional: false
+  - group: syscalls
+    event: sys_enter_fchmodat
+    program: trace_sys_enter_fchmodat
+    optional: false
+  - group: syscalls
+    event: sys_enter_chown
+    program: trace_sys_enter_chown
+    optional: false
+  - group: syscalls
+    event: sys_enter_fchown
+    program: trace_sys_enter_fchown
+    optional: false
+  - group: syscalls
+    event: sys_enter_fchownat
+    program: trace_sys_enter_fchownat
+    optional: false
+  - group: syscalls
+    event: sys_enter_newfstatat
+    program: trace_sys_enter_newfstatat
+    optional: false
+  - group: syscalls
+    event: sys_enter_access
+    program: trace_sys_enter_access
+    optional: false
+  - group: syscalls
+    event: sys_enter_faccessat
+    program: trace_sys_enter_faccessat
+    optional: false
+  - group: syscalls
+    event: sys_enter_pipe2
+    program: trace_sys_enter_pipe2
+    optional: false
+  - group: syscalls
+    event: sys_enter_dup
+    program: trace_sys_enter_dup
+    optional: false
+  - group: syscalls
+    event: sys_enter_dup2
+    program: trace_sys_enter_dup2
+    optional: false
+  - group: syscalls
+    event: sys_enter_dup3
+    program: trace_sys_enter_dup3
+    optional: false
+  - group: syscalls
+    event: sys_enter_mmap
+    program: trace_sys_enter_mmap
+    optional: false
+  - group: syscalls
+    event: sys_enter_munmap
+    program: trace_sys_enter_munmap
+    optional: false
+  - group: syscalls
+    event: sys_enter_mprotect
+    program: trace_sys_enter_mprotect
+    optional: false
+  - group: syscalls
+    event: sys_enter_sendfile
+    program: trace_sys_enter_sendfile
+    optional: false
+  - group: syscalls
+    event: sys_enter_copy_file_range
+    program: trace_sys_enter_copy_file_range
+    optional: true
+  - group: syscalls
+    event: sys_enter_splice
+    program: trace_sys_enter_splice
+    optional: false
+
+  - group: syscalls
+    event: sys_enter_socket
+    program: trace_sys_enter_socket
+    optional: false
+  - group: syscalls
+    event: sys_enter_connect
+    program: trace_sys_enter_connect
+    optional: false
+  - group: syscalls
+    event: sys_enter_bind
+    program: trace_sys_enter_bind
+    optional: false
+  - group: syscalls
+    event: sys_enter_listen
+    program: trace_sys_enter_listen
+    optional: false
+  - group: syscalls
+    event: sys_enter_accept
+    program: trace_sys_enter_accept
+    optional: false
+  - group: syscalls
+    event: sys_enter_accept4
+    program: trace_sys_enter_accept4
+    optional: false
+  - group: syscalls
+    event: sys_enter_sendto
+    program: trace_sys_enter_sendto
+    optional: false
+  - group: syscalls
+    event: sys_enter_recvfrom
+    program: trace_sys_enter_recvfrom
+    optional: false
+  - group: syscalls
+    event: sys_enter_sendmsg
+    program: trace_sys_enter_sendmsg
+    optional: false
+  - group: syscalls
+    event: sys_enter_recvmsg
+    program: trace_sys_enter_recvmsg
+    optional: false
+  - group: syscalls
+    event: sys_enter_shutdown
+    program: trace_sys_enter_shutdown
+    optional: false
+
+# ---- persisted SQLite event schema ----
+schema:
+  version: 1
+  table: events
+  table_doc: one row per collected event
+
+  columns:
+    - name: id
+      type: INTEGER PRIMARY KEY AUTOINCREMENT
+      insert: false
+      doc: row id, insertion order
+    - name: ts
+      type: INTEGER NOT NULL
+      doc: unix nanoseconds; format with datetime(ts/1e9,'unixepoch')
+    - name: category
+      type: TEXT NOT NULL DEFAULT ''
+      doc: process | file | network | memory | block
+    - name: action
+      type: TEXT NOT NULL DEFAULT ''
+      doc: exec, exit, fork, clone, open, read, write, rename, unlink, bind, connect, listen, ...
+    - name: pid
+      type: INTEGER NOT NULL DEFAULT 0
+      doc: process id
+    - name: ppid
+      type: INTEGER NOT NULL DEFAULT 0
+      doc: parent process id
+    - name: uid
+      type: INTEGER NOT NULL DEFAULT 0
+      doc: user id
+    - name: comm
+      type: TEXT NOT NULL DEFAULT ''
+      doc: process name
+    - name: exe
+      type: TEXT NOT NULL DEFAULT ''
+      doc: resolved executable path
+    - name: container_id
+      type: TEXT NOT NULL DEFAULT ''
+      doc: container id
+    - name: cgroup_path
+      type: TEXT NOT NULL DEFAULT ''
+      doc: cgroup path
+    - name: path
+      type: TEXT NOT NULL DEFAULT ''
+      doc: file path
+    - name: old_path
+      type: TEXT NOT NULL DEFAULT ''
+      doc: rename source path
+    - name: local_addr
+      type: TEXT NOT NULL DEFAULT ''
+      doc: local address
+    - name: local_port
+      type: INTEGER NOT NULL DEFAULT 0
+      doc: local port
+    - name: remote_addr
+      type: TEXT NOT NULL DEFAULT ''
+      doc: remote address
+    - name: remote_port
+      type: INTEGER NOT NULL DEFAULT 0
+      doc: remote port
+    - name: remote_host
+      type: TEXT NOT NULL DEFAULT ''
+      doc: resolved remote hostname
+    - name: target_pid
+      type: INTEGER NOT NULL DEFAULT 0
+      doc: signal/ptrace target pid
+    - name: exit_code
+      type: INTEGER NOT NULL DEFAULT 0
+      doc: process exit code
+    - name: dropped_before
+      type: INTEGER NOT NULL DEFAULT 0
+      doc: events lost immediately before this row
+    - name: metadata
+      type: TEXT NOT NULL DEFAULT '{}'
+      doc: JSON object; query with json_extract(metadata, '$.key')
+    - name: raw
+      type: TEXT NOT NULL DEFAULT '{}'
+      doc: JSON object; raw source event
+
+  indexes:
+    - name: idx_events_ts
+      columns: [ts]
+    - name: idx_events_pid_ts
+      columns: [pid, ts]
+    - name: idx_events_path
+      columns: [path]
+    - name: idx_events_cat_action_ts
+      columns: [category, action, ts]
+
+# ---- kernel->userspace transport ABI ----
+# The byte-for-byte layout the eBPF program writes and userspace decodes. It is
+# generated into internal/abi/kernel_event.gen.h (C), which collector.bpf.c
+# includes; the Go side (collectorEvent) is in turn generated by bpf2go from the
+# compiled object's BTF. So this is the single source for the wire format.
+# `type` is the C type verbatim; `count` (a constant name or integer) makes the
+# field a fixed array. Field order defines the on-wire byte order.
+kernel_event:
+  struct: ltm_kernel_event
+  constants:
+    - name: LTM_PATH_MAX_LEN
+      value: 128
+    - name: LTM_COMM_LEN
+      value: 16
+    - name: LTM_LABEL_LEN
+      value: 16
+  fields:
+    - {name: ts_ns, type: __u64}
+    - {name: bytes, type: __u64}
+    - {name: pid, type: __u32}
+    - {name: uid, type: __u32}
+    - {name: local_port, type: __u16}
+    - {name: remote_port, type: __u16}
+    - {name: local_ip4, type: __u32}
+    - {name: remote_ip4, type: __u32}
+    - {name: comm, type: char, count: LTM_COMM_LEN}
+    - {name: category, type: char, count: LTM_LABEL_LEN}
+    - {name: action, type: char, count: LTM_LABEL_LEN}
+    - {name: path, type: char, count: LTM_PATH_MAX_LEN}
+    - {name: old_path, type: char, count: LTM_PATH_MAX_LEN}
+    - {name: syscall_nr, type: __u32}
+    - {name: fd, type: __s32}
+    - {name: aux, type: __u32}

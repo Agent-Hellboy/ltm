@@ -1,13 +1,14 @@
 # AGENTS.md
 
 Contributor guide for `ltm`. User overview: `README.md`. Detailed docs:
-`docs/` (index, CLI, querying, recording, architecture, security).
+`docs/` (index, ABI, CLI, querying, recording, architecture, security).
 
 ## Layout
 
 ```text
 cmd/ltm/           entrypoint only (public import surface)
 internal/
+  abi/             generated schema/tracepoint/kernel ABI contract
   cli/             commands, global flags, daemon spawn
   daemon/          batching, flushLoop, collector wiring
   collector/       ignore-path filter, bounded buffer
@@ -27,8 +28,9 @@ All implementation under `internal/`. Do not add packages at the repo root.
 ```bash
 go test ./...
 go build -o bin/ltm ./cmd/ltm
+make generate             # regenerate ABI Go/C outputs from abi.yaml
 make integration          # eBPF smoke; Linux + root
-make ebpf                 # after editing collector.bpf.c (clang, Linux)
+make ebpf                 # after editing collector.bpf.c or abi.yaml (clang, Linux)
 ```
 
 CI: unit tests (Ubuntu + macOS), integration (Ubuntu), BPF rebuild + binary build.
@@ -42,9 +44,10 @@ Defaults: DB `~/.local/share/ltm/ltm.db`, PID `~/.local/run/ltm.pid`.
 **Events.** Everything is a `storage.Event`. Keep category/action strings
 stable (`process`/`file`/`network`/`memory`/`block`; `exec`/`exit`/`open`/
 `write`/`read`/`rename`/`unlink`/`bind`/`connect`/`listen`/…). Bump
-`SchemaVersion` only for incompatible replay/query changes. Update
-`SchemaDoc` when the `events` schema changes (shown by `ltm query sql` and
-embedded in agent prompts).
+`abi.SchemaVersion` only for incompatible replay/query changes. Update
+`internal/abi/abi.yaml` when the `events` schema changes; `SchemaDoc` and the
+storage DDL are generated from it (shown by `ltm query sql` and embedded in
+agent prompts).
 
 **Storage.** `Open` = sole writer (WAL, `MaxOpenConns(1)`). `OpenReadOnly` for
 every read path (`query_only=ON`); error if the DB file is missing — never
@@ -52,10 +55,13 @@ create on a read path. Extend `Filter` instead of new one-off `EventsByX`
 helpers. `DroppedBefore` is additive (`SUM`); do not overwrite. `watch` uses
 `EventsAfterID` / `LatestEventID` — keep them id-ordered and cheap.
 
-**eBPF.** Source `collector.bpf.c`, embedded `collector_bpfel.o`, loader
+**eBPF.** Source `collector.bpf.c`, ABI source `internal/abi/abi.yaml`,
+generated header `internal/abi/kernel_event.gen.h`, embedded object
+`collector_bpfel.o`, generated Go bindings `collector_bpfel.go`, loader
 `real_linux.go`, stub `real_stub.go`. x86_64 only (`__TARGET_ARCH_x86`).
-Headers under `headers/` are minimal stubs. Rebuild `.o` on Linux after BPF
-edits; CI rebuilds too. No simulated collector — use `ltm benchmark`.
+Headers under `headers/` are minimal stubs. Run `make generate` after editing
+ABI/schema/tracepoint metadata; run `make ebpf` on Linux after BPF or ABI
+layout edits. CI rebuilds too. No simulated collector — use `ltm benchmark`.
 
 **Agent.** `LTM_AGENT` / `--agent`: `claude|codex|cursor|gemini|auto|<custom>`.
 SQL runs only via `OpenReadOnly` + `RawSQL`; `ExtractSQL` rejects non-SELECT /

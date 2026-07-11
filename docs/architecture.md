@@ -17,7 +17,8 @@ eBPF tracepoints ──▶ ebpf.RealCollector ──▶ collector ──▶ daem
 
 | Stage | Package | Role |
 |---|---|---|
-| Capture | `internal/ebpf` | Attach syscall/sched/block tracepoints; map each kernel record to `storage.Event`. Linux only; non-Linux stub errors. BPF object is embedded (`collector_bpfel.o`); rebuild with `make ebpf`. |
+| ABI | `internal/abi` | Source-of-truth `abi.yaml` plus generated schema/version constants, tracepoint table, and kernel-event header used by storage, CLI help, agent prompts, and BPF compilation. |
+| Capture | `internal/ebpf` | Attach syscall/sched/block tracepoints; map each kernel record to `storage.Event`. Linux only; non-Linux stub errors. BPF object and Go bindings are generated/embedded; rebuild with `make ebpf`. |
 | Filter | `internal/collector` | Drop ignored path prefixes (userspace list; BPF only filters `/proc`/`/sys`/`/dev`). Bounded channel; overflow increments a dropped counter. |
 | Batch | `internal/daemon` | `flushLoop` writes batches in one transaction. On shutdown: stop sources, drain the buffer, flush with a **fresh** context (the cancelled run ctx must not abort the final write), then return so the caller can close the store. |
 | Store | `internal/storage` | SQLite (`modernc.org/sqlite`, no CGo). Daemon holds the only writer (`Open`, WAL, `MaxOpenConns(1)`). Every read path uses `OpenReadOnly` + `PRAGMA query_only=ON`. |
@@ -42,6 +43,7 @@ simulated collector.
 ```text
 cmd/ltm          thin main → cli.Execute
 internal/cli     flags, subcommands, daemon spawn (Setsid)
+internal/abi     abi.yaml + generated schema/tracepoint/kernel ABI
 internal/daemon  service lifecycle + flushLoop
 internal/collector  ignore rules + fan-in buffer
 internal/ebpf    BPF C, embedded .o, RealCollector

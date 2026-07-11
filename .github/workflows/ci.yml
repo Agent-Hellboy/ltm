@@ -22,6 +22,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify generated ABI files are up to date
+        run: |
+          make generate
+          git diff --exit-code -- internal/abi internal/storage/schema_gen.go
       - name: Run unit tests
         run: go test ./...
 
@@ -48,8 +52,10 @@ jobs:
           cache: true
       - name: Install BPF build tools
         run: sudo apt-get update && sudo apt-get install -y clang llvm
-      - name: Rebuild eBPF object
+      - name: Verify generated eBPF artifacts are up to date
         run: make ebpf
+      - name: Check generated eBPF artifacts for drift
+        run: git diff --exit-code -- internal/abi internal/ebpf internal/storage/schema_gen.go
       - name: Build Linux binary
         run: go build -o bin/ltm ./cmd/ltm
       - name: Verify embedded object is present

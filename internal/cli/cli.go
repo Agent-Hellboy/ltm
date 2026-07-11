@@ -19,6 +19,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"ltm/internal/abi"
 	"ltm/internal/agent"
 	"ltm/internal/daemon"
 	"ltm/internal/diff"
@@ -740,7 +741,7 @@ Usage:
   ltm query sql "<SELECT ...>"
   ltm query --json sql "<SELECT ...>"
 
-` + storage.SchemaDoc + `
+` + abi.SchemaDoc + `
 
 Examples:
   ltm query sql "SELECT comm, count(*) n FROM events GROUP BY comm ORDER BY n DESC LIMIT 10"

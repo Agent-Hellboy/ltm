@@ -5,32 +5,6 @@ import (
 	"time"
 )
 
-const SchemaVersion = 1
-
-// SchemaDoc describes the queryable data model. It is shown by `ltm query sql`
-// with no arguments and embedded in the prompt sent to a configured agent, so
-// keep it in sync with the schema in store.go.
-const SchemaDoc = `Table: events (one row per collected event)
-  id             INTEGER  row id, insertion order
-  ts             INTEGER  unix nanoseconds; format with datetime(ts/1e9,'unixepoch')
-  category       TEXT     process | file | network | memory | block
-  action         TEXT     exec, exit, fork, clone, open, read, write, rename, unlink,
-                          bind, connect, listen, ...
-  pid, ppid, uid INTEGER
-  comm           TEXT     process name
-  exe            TEXT     resolved executable path
-  container_id   TEXT
-  cgroup_path    TEXT
-  path, old_path TEXT     file path / rename source
-  local_addr, local_port, remote_addr, remote_port, remote_host
-  target_pid     INTEGER
-  exit_code      INTEGER
-  dropped_before INTEGER  events lost immediately before this row
-  metadata       TEXT     JSON object; query with json_extract(metadata, '$.key')
-  raw            TEXT     JSON object; raw source event
-
-Indexes: ts, (pid, ts), path, (category, action, ts)`
-
 type Event struct {
 	ID            int64           `json:"id,omitempty"`
 	SchemaVersion int             `json:"schema_version"`
