@@ -6,6 +6,7 @@ import (
 	"ltm/internal/storage"
 )
 
-type Source interface {
+// EventSource emits storage events from some backing capture mechanism.
+type EventSource interface {
 	Run(context.Context, chan<- storage.Event) error
 }

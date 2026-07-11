@@ -10,9 +10,9 @@ Related: [CLI](cli.md) · [querying](querying.md) · [recording](recording.md) �
 ## Pipeline
 
 ```
-eBPF tracepoints ──▶ ebpf.RealCollector ──▶ collector ──▶ daemon.flushLoop ──▶ storage (SQLite)
-                     kernel → Event         ignore +       batch TX              single WAL writer
-                                            buffer + drop
+eBPF tracepoints ──▶ ebpf.EventSource ──▶ collector ──▶ daemon.flushLoop ──▶ storage (SQLite)
+                     kernel → Event       ignore +       batch TX              single WAL writer
+                                          buffer + drop
 ```
 
 | Stage | Package | Role |
@@ -46,7 +46,7 @@ internal/cli     flags, subcommands, daemon spawn (Setsid)
 internal/abi     abi.yaml + generated schema/tracepoint/kernel ABI
 internal/daemon  service lifecycle + flushLoop
 internal/collector  ignore rules + fan-in buffer
-internal/ebpf    BPF C, generated .o/.go bindings, RealCollector
+internal/ebpf    EventSource contract, BPF C, generated .o/.go bindings
 internal/storage Event, Filter, SQLite
 internal/diff    time-window summary
 internal/query   NL templates
