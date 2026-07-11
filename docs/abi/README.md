@@ -8,6 +8,10 @@ consume:
 - field meanings and invariants
 - compatibility rules for schema changes
 
+Handwritten inputs live in `internal/abi/abi.yaml` and `internal/ebpf/collector.bpf.c`.
+Generated files such as `kernel_event.gen.h`, `tracepoints_gen.go`, and
+`collector_bpfel.go` are derived artifacts and should not be edited directly.
+
 Pages:
 
 | Page | Contents |

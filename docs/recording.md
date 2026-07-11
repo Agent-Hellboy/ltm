@@ -1,8 +1,8 @@
 # Recording
 
 `ltm start` loads an embedded BPF object, attaches tracepoints, and streams
-`storage.Event` rows into SQLite. Query features work on any OS; **recording is
-Linux/x86_64 only**.
+`storage.Event` rows into SQLite. Query and benchmark features do not require a
+Linux recorder; **recording itself is Linux/x86_64 only**.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ Without a recorder host, seed data with `ltm benchmark` (see [cli.md](cli.md)).
 
 ## Coverage
 
-Source of truth: `internal/abi/abi.yaml` (generated runtime table:
+Handwritten capture manifest: `internal/abi/abi.yaml` (generated runtime table:
 `internal/abi/tracepoints_gen.go`). Categories and typical actions:
 
 | Category | Hooks (summary) | Common `action` values |
@@ -62,8 +62,8 @@ go build -o bin/ltm ./cmd/ltm
 If you changed `internal/abi/abi.yaml` without touching BPF C, run
 `make generate`; run `make ebpf` as well if the tracepoint set or kernel-event
 layout changed. The generated `collector_bpfel.o` and `collector_bpfel.go` are
-checked in and rebuilt in CI. Headers under `internal/ebpf/headers/` are
-minimal stubs, not a full vmlinux/libbpf tree.
+checked in, rebuilt in CI, and should not be hand-edited. Headers under
+`internal/ebpf/headers/` are minimal stubs, not a full vmlinux/libbpf tree.
 
 ## Limitations
 

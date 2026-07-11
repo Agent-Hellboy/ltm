@@ -17,7 +17,7 @@ eBPF tracepoints ──▶ ebpf.RealCollector ──▶ collector ──▶ daem
 
 | Stage | Package | Role |
 |---|---|---|
-| ABI | `internal/abi` | Source-of-truth `abi.yaml` plus generated schema/version constants, tracepoint table, and kernel-event header used by storage, CLI help, agent prompts, and BPF compilation. |
+| ABI | `internal/abi` | Handwritten `abi.yaml` plus generated schema/version constants, tracepoint table, and kernel-event header used by storage, CLI help, agent prompts, and BPF compilation. |
 | Capture | `internal/ebpf` | Attach syscall/sched/block tracepoints; map each kernel record to `storage.Event`. Linux only; non-Linux stub errors. BPF object and Go bindings are generated/embedded; rebuild with `make ebpf`. |
 | Filter | `internal/collector` | Drop ignored path prefixes (userspace list; BPF only filters `/proc`/`/sys`/`/dev`). Bounded channel; overflow increments a dropped counter. |
 | Batch | `internal/daemon` | `flushLoop` writes batches in one transaction. On shutdown: stop sources, drain the buffer, flush with a **fresh** context (the cancelled run ctx must not abort the final write), then return so the caller can close the store. |
@@ -46,7 +46,7 @@ internal/cli     flags, subcommands, daemon spawn (Setsid)
 internal/abi     abi.yaml + generated schema/tracepoint/kernel ABI
 internal/daemon  service lifecycle + flushLoop
 internal/collector  ignore rules + fan-in buffer
-internal/ebpf    BPF C, embedded .o, RealCollector
+internal/ebpf    BPF C, generated .o/.go bindings, RealCollector
 internal/storage Event, Filter, SQLite
 internal/diff    time-window summary
 internal/query   NL templates

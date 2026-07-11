@@ -12,9 +12,10 @@ Current schema version: `1`
 
 - `category` and `action` strings are part of the public contract. Keep them
   stable.
-- Adding a new column is a schema change and must update this document.
-- Reinterpreting an existing column incompatibly requires a `SchemaVersion`
-  bump.
+- Adding a new column is a schema change. Update `internal/abi/abi.yaml`,
+  regenerate outputs, and update this document.
+- Reinterpreting an existing column incompatibly requires an `abi.SchemaVersion`
+  bump in `internal/abi/abi.yaml`.
 - `metadata` may gain new keys over time. Existing keys should keep their
   meaning.
 - `raw` is best-effort source detail, not the preferred stable query surface.

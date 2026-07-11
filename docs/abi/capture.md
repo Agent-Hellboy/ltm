@@ -4,9 +4,9 @@ This document defines the capture-side ABI between the embedded BPF object and
 the Go loader in `internal/ebpf`.
 
 It is narrower than the persisted SQL schema ABI. This contract matters to
-contributors changing `collector.bpf.c`, `internal/abi/abi.yaml`,
-`internal/abi/kernel_event.gen.h`, `internal/abi/tracepoints_gen.go`, or
-`real_linux.go`.
+contributors changing the capture inputs or loader behavior. In practice that
+means `collector.bpf.c`, `internal/abi/abi.yaml`, and `real_linux.go`; the
+generated files they produce are part of the contract but are not hand-edited.
 
 ## Scope
 
@@ -26,14 +26,21 @@ time into `internal/ebpf/collector_bpfel.o`, with companion Go bindings in
 `internal/ebpf/collector_bpfel.go`, and that object is embedded into the Go
 binary.
 
-Source of truth:
+Primary source inputs:
 
-- `internal/ebpf/collector.bpf.c`
-- `internal/ebpf/collector_bpfel.o`
 - `internal/abi/abi.yaml`
+- `internal/ebpf/collector.bpf.c`
+- `internal/ebpf/real_linux.go`
+
+Generated artifacts:
+
 - `internal/abi/kernel_event.gen.h`
 - `internal/abi/tracepoints_gen.go`
-- `internal/ebpf/real_linux.go`
+- `internal/ebpf/collector_bpfel.o`
+- `internal/ebpf/collector_bpfel.go`
+
+Editing a generated artifact directly is a mistake: `make generate` / `make ebpf`
+will overwrite it.
 
 Required loader sequence:
 
@@ -71,7 +78,7 @@ Breaking changes must update both code and this ABI reference.
 ## Required object artifacts
 
 The Go loader expects the embedded object to provide at least these artifacts.
-The normative descriptions live in `internal/abi/abi.yaml`, which generates
+The normative descriptions start in `internal/abi/abi.yaml`, which generates
 `internal/abi/kernel_event.gen.h` and `internal/abi/tracepoints_gen.go`.
 
 ### Map names

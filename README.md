@@ -18,7 +18,8 @@ sudo ./bin/ltm stop
 ```
 
 Recording needs root (or `CAP_BPF` + `CAP_PERFMON`). Querying does not.
-Without a live host: `ltm benchmark --count 1000` seeds synthetic events.
+Without a live Linux recorder: `ltm benchmark --count 1000` seeds synthetic
+events into a DB that you can inspect with `timeline`, `diff`, and `query`.
 
 Global flags go **before** the subcommand (`ltm --db /tmp/ltm.db status`).
 Defaults: DB `~/.local/share/ltm/ltm.db`, PID `~/.local/run/ltm.pid`.
@@ -60,16 +61,18 @@ chown, stat, access, truncate, dup, pipe, …), **memory** (mmap, munmap,
 mprotect), **network** (socket, connect, bind, listen, accept, send/recv,
 shutdown), **block** (`block_rq_issue`).
 
-BPF skips `/proc`, `/sys`, `/dev` and the daemon's own PID. Full list:
-`internal/abi/tracepoints_gen.go`. After editing `collector.bpf.c`, rebuild
-with `make ebpf`. After editing ABI metadata in `internal/abi/abi.yaml`, run
-`make generate` and then `make ebpf` if the kernel-event layout or tracepoint
-table changed.
+BPF skips `/proc`, `/sys`, `/dev` and the daemon's own PID. The handwritten
+tracepoint manifest lives in `internal/abi/abi.yaml`; the checked-in runtime
+table is generated into `internal/abi/tracepoints_gen.go`. After editing
+`collector.bpf.c`, rebuild with `make ebpf`. After editing ABI metadata in
+`internal/abi/abi.yaml`, run `make generate` and then `make ebpf` if the
+kernel-event layout or tracepoint table changed.
 
 ### Limitations
 
 - **x86_64 recording only** — BPF is built `-D__TARGET_ARCH_x86`
-  ([#2](https://github.com/Agent-Hellboy/ltm/issues/2)). Query works anywhere.
+  ([#2](https://github.com/Agent-Hellboy/ltm/issues/2)). Querying and
+  benchmark-generated demo data do not require Linux recording support.
 - **IPv4 addresses only** — IPv6 connects/binds are stored without a decoded address.
 - **Byte counts** are the syscall's *requested* size (enter probe); short/failed
   I/O over-counts; `readv`/`writev`/`sendmsg`/`recvmsg` report `0`.
@@ -81,6 +84,7 @@ table changed.
 ```bash
 go test ./...                # local/unit tests
 make generate                # regenerate ABI/schema outputs from abi.yaml
+make ebpf                    # regenerate checked-in BPF object/bindings (Linux)
 make integration             # real eBPF recording; Linux + root
 ```
 

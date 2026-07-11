@@ -8,7 +8,7 @@ Contributor guide for `ltm`. User overview: `README.md`. Detailed docs:
 ```text
 cmd/ltm/           entrypoint only (public import surface)
 internal/
-  abi/             generated schema/tracepoint/kernel ABI contract
+  abi/             handwritten abi.yaml + generated schema/tracepoint/kernel contract
   cli/             commands, global flags, daemon spawn
   daemon/          batching, flushLoop, collector wiring
   collector/       ignore-path filter, bounded buffer
@@ -18,7 +18,7 @@ internal/
   diff/            time-window machine-state diff
   query/           deterministic NL templates
 tests/             integration.sh (Linux + root)
-docs/              README index + cli, querying, recording, architecture, security
+docs/              README index + abi, cli, querying, recording, architecture, security
 ```
 
 All implementation under `internal/`. Do not add packages at the repo root.
@@ -55,13 +55,15 @@ create on a read path. Extend `Filter` instead of new one-off `EventsByX`
 helpers. `DroppedBefore` is additive (`SUM`); do not overwrite. `watch` uses
 `EventsAfterID` / `LatestEventID` — keep them id-ordered and cheap.
 
-**eBPF.** Source `collector.bpf.c`, ABI source `internal/abi/abi.yaml`,
-generated header `internal/abi/kernel_event.gen.h`, embedded object
-`collector_bpfel.o`, generated Go bindings `collector_bpfel.go`, loader
-`real_linux.go`, stub `real_stub.go`. x86_64 only (`__TARGET_ARCH_x86`).
-Headers under `headers/` are minimal stubs. Run `make generate` after editing
-ABI/schema/tracepoint metadata; run `make ebpf` on Linux after BPF or ABI
-layout edits. CI rebuilds too. No simulated collector — use `ltm benchmark`.
+**eBPF.** Handwritten inputs: `collector.bpf.c`, `internal/abi/abi.yaml`,
+loader `real_linux.go`, stub `real_stub.go`. Generated outputs:
+`internal/abi/kernel_event.gen.h`, `internal/abi/tracepoints_gen.go`,
+embedded object `collector_bpfel.o`, Go bindings `collector_bpfel.go`. x86_64
+only (`__TARGET_ARCH_x86`). Headers under `headers/` are minimal stubs. Run
+`make generate` after editing ABI/schema/tracepoint metadata; run `make ebpf`
+on Linux after BPF or ABI layout edits. Generated outputs are checked in but
+not hand-edited. CI rebuilds too. No simulated collector — use
+`ltm benchmark`.
 
 **Agent.** `LTM_AGENT` / `--agent`: `claude|codex|cursor|gemini|auto|<custom>`.
 SQL runs only via `OpenReadOnly` + `RawSQL`; `ExtractSQL` rejects non-SELECT /
