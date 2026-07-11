@@ -79,7 +79,7 @@ table changed.
 ## Development
 
 ```bash
-go test ./...                # any OS
+go test ./...                # local/unit tests
 make generate                # regenerate ABI/schema outputs from abi.yaml
 make integration             # real eBPF recording; Linux + root
 ```

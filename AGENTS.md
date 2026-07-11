@@ -33,7 +33,7 @@ make integration          # eBPF smoke; Linux + root
 make ebpf                 # after editing collector.bpf.c or abi.yaml (clang, Linux)
 ```
 
-CI: unit tests (Ubuntu + macOS), integration (Ubuntu), BPF rebuild + binary build.
+CI: unit tests (Ubuntu), integration (Ubuntu), BPF rebuild + binary build.
 
 ## Hard rules
 
