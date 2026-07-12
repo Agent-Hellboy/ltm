@@ -1,28 +1,19 @@
 //go:build ignore
 
 #include "headers/common.h"
+#include "../abi/kernel_event.gen.h"
 
-#define PATH_MAX_LEN 128
-#define COMM_LEN 16
+#define PATH_MAX_LEN LTM_PATH_MAX_LEN
+#define COMM_LEN LTM_COMM_LEN
 
-struct event {
-	__u64 ts_ns;
-	__u64 bytes;
-	__u32 pid;
-	__u32 uid;
-	__u16 local_port;
-	__u16 remote_port;
-	__u32 local_ip4;
-	__u32 remote_ip4;
-	char comm[COMM_LEN];
-	char category[16];
-	char action[16];
-	char path[PATH_MAX_LEN];
-	char old_path[PATH_MAX_LEN];
-	__u32 syscall_nr;
-	__s32 fd;
-	__u32 aux;
-};
+typedef struct ltm_kernel_event event;
+
+// Force bpf2go to emit a Go type for the event layout. The events perf-event
+// array carries no BTF value type, so without a by-value reference nothing
+// pulls the struct into the generated bindings and the Go mirror could drift
+// again. Must be by value: bpf2go only generates Go structs for types used by
+// value, not for a bare pointer's pointee.
+const event _ltm_unused_event __attribute__((unused));
 
 struct path_state {
 	char path[PATH_MAX_LEN];
@@ -130,7 +121,7 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(key_size, sizeof(__u32));
-	__uint(value_size, sizeof(struct event));
+	__uint(value_size, sizeof(event));
 	__uint(max_entries, 1);
 } scratch SEC(".maps");
 
@@ -143,7 +134,7 @@ struct {
 
 static long (*bpf_map_delete_elem)(void *map, const void *key) = (void *)3;
 
-static __always_inline void fill_common(struct event *ev) {
+static __always_inline void fill_common(event *ev) {
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
 	// Boot-time clock (includes suspend) so timestamps line up with /proc/stat
 	// btime in userspace; plain ktime (monotonic) drifts across suspend.
@@ -192,18 +183,18 @@ static __always_inline int path_ignored_user(const char *path) {
 	return path_ignored_prefix(buf);
 }
 
-static __always_inline void set_category_action(struct event *ev, const char *category, const char *action) {
+static __always_inline void set_category_action(event *ev, const char *category, const char *action) {
 	__builtin_memcpy(ev->category, category, 16);
 	__builtin_memcpy(ev->action, action, 16);
 }
 
-static __always_inline void submit(void *ctx, struct event *ev) {
+static __always_inline void submit(void *ctx, event *ev) {
 	bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, ev, sizeof(*ev));
 }
 
-static __always_inline struct event *reserve_event(void) {
+static __always_inline event *reserve_event(void) {
 	__u32 zero = 0;
-	struct event *ev = bpf_map_lookup_elem(&scratch, &zero);
+	event *ev = bpf_map_lookup_elem(&scratch, &zero);
 	if (!ev) {
 		return 0;
 	}
@@ -269,7 +260,7 @@ static __always_inline int emit_event(void *ctx, const char *category, const cha
 		return 0;
 	}
 
-	struct event *ev = reserve_event();
+	event *ev = reserve_event();
 	if (!ev) {
 		return 0;
 	}
@@ -303,7 +294,7 @@ static __always_inline int emit_fd_io(void *ctx, const char *category, const cha
 		return 0;
 	}
 
-	struct event *ev = reserve_event();
+	event *ev = reserve_event();
 	if (!ev) {
 		return 0;
 	}
@@ -336,7 +327,7 @@ static __always_inline int emit_sockaddr(void *ctx, const char *action, const vo
 		return emit_event(ctx, "network", action, 0, 0, 0, -1, 0, syscall_nr);
 	}
 
-	struct event *ev = reserve_event();
+	event *ev = reserve_event();
 	if (!ev) {
 		return 0;
 	}
@@ -382,7 +373,7 @@ int trace_sched_process_fork(struct trace_sched_process_fork *ctx) {
 	if (should_skip()) {
 		return 0;
 	}
-	struct event *ev = reserve_event();
+	event *ev = reserve_event();
 	if (!ev) {
 		return 0;
 	}
@@ -400,7 +391,7 @@ int trace_sched_process_exit(struct trace_sched_process_exit *ctx) {
 	if (should_skip()) {
 		return 0;
 	}
-	struct event *ev = reserve_event();
+	event *ev = reserve_event();
 	if (!ev) {
 		return 0;
 	}
@@ -417,7 +408,7 @@ int trace_block_rq_issue(struct trace_block_rq_issue *ctx) {
 	if (should_skip()) {
 		return 0;
 	}
-	struct event *ev = reserve_event();
+	event *ev = reserve_event();
 	if (!ev) {
 		return 0;
 	}

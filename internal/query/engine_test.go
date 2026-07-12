@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"ltm/internal/abi"
 	"ltm/internal/storage"
 )
 
@@ -27,7 +28,7 @@ func TestQueryEngine(t *testing.T) {
 	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
 	events := []storage.Event{
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base,
 			Category:      "file",
 			Action:        "write",
@@ -38,7 +39,7 @@ func TestQueryEngine(t *testing.T) {
 			Path:          "/etc/nginx/nginx.conf",
 		},
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(1 * time.Minute),
 			Category:      "network",
 			Action:        "listen",
@@ -50,7 +51,7 @@ func TestQueryEngine(t *testing.T) {
 			LocalPort:     8080,
 		},
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(2 * time.Minute),
 			Category:      "network",
 			Action:        "connect",
@@ -63,7 +64,7 @@ func TestQueryEngine(t *testing.T) {
 			RemoteHost:    "localhost",
 		},
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(3 * time.Minute),
 			Category:      "network",
 			Action:        "connect",

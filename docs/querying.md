@@ -59,13 +59,15 @@ multi-statement; rejects `WITH … DELETE`). Execution always goes through
 ## SQL
 
 ```bash
-ltm query sql                         # print schema (SchemaDoc)
+ltm query sql                         # print the generated schema summary
 ltm query sql "SELECT …"
 ltm sql "SELECT …"                    # shorthand
 ltm --json query sql "SELECT …"       # JSON rows
 ```
 
 ### Schema (`events`)
+
+Reference: [ABI schema doc](abi/schema.md)
 
 | Column | Type | Notes |
 |---|---|---|

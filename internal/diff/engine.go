@@ -68,7 +68,7 @@ type ProcessRestart struct {
 }
 
 func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, error) {
-	events, err := e.store.EventsBetween(ctx, from, to, 5000)
+	events, err := e.store.Query(ctx, storage.Filter{From: from, To: to, OrderAsc: true, Limit: 5000})
 	if err != nil {
 		return DiffReport{}, err
 	}

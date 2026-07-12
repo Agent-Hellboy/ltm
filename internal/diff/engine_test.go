@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"ltm/internal/abi"
 	"ltm/internal/storage"
 )
 
@@ -26,7 +27,7 @@ func TestDiffEngine(t *testing.T) {
 	base := time.Date(2026, 7, 8, 14, 0, 0, 0, time.UTC)
 	events := []storage.Event{
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(1 * time.Minute),
 			Category:      "process",
 			Action:        "exec",
@@ -37,7 +38,7 @@ func TestDiffEngine(t *testing.T) {
 			Exe:           "/usr/sbin/nginx",
 		},
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(2 * time.Minute),
 			Category:      "file",
 			Action:        "write",
@@ -48,7 +49,7 @@ func TestDiffEngine(t *testing.T) {
 			Path:          "/etc/nginx/nginx.conf",
 		},
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(3 * time.Minute),
 			Category:      "network",
 			Action:        "listen",
@@ -60,7 +61,7 @@ func TestDiffEngine(t *testing.T) {
 			LocalPort:     8080,
 		},
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(4 * time.Minute),
 			Category:      "network",
 			Action:        "connect",
@@ -72,7 +73,7 @@ func TestDiffEngine(t *testing.T) {
 			RemotePort:    8080,
 		},
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(5 * time.Minute),
 			Category:      "process",
 			Action:        "exit",
@@ -83,7 +84,7 @@ func TestDiffEngine(t *testing.T) {
 			ExitCode:      0,
 		},
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(6 * time.Minute),
 			Category:      "process",
 			Action:        "exec",
@@ -94,7 +95,7 @@ func TestDiffEngine(t *testing.T) {
 			Exe:           "/usr/sbin/nginx",
 		},
 		{
-			SchemaVersion: storage.SchemaVersion,
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(7 * time.Minute),
 			Category:      "file",
 			Action:        "rmdir",

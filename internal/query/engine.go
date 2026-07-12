@@ -38,7 +38,7 @@ func (e *Engine) Execute(ctx context.Context, question string) (Result, error) {
 	case reWhoModified.MatchString(q):
 		m := reWhoModified.FindStringSubmatch(q)
 		path := strings.TrimSpace(m[1])
-		events, err := e.store.EventsByPath(ctx, path, 200)
+		events, err := e.store.Query(ctx, storage.Filter{ExactPath: path, OrderAsc: true, Limit: 200})
 		if err != nil {
 			return Result{}, err
 		}
@@ -201,7 +201,7 @@ func (e *Engine) queryPID(ctx context.Context, q string) (Result, error) {
 		return Result{}, nil
 	}
 	pid, _ := strconv.Atoi(m[1])
-	events, err := e.store.EventsByPID(ctx, pid, 200)
+	events, err := e.store.Query(ctx, storage.Filter{PIDs: []int{pid}, OrderAsc: true, Limit: 200})
 	if err != nil {
 		return Result{}, err
 	}
@@ -219,7 +219,7 @@ func (e *Engine) queryFile(ctx context.Context, q string) (Result, error) {
 	}
 	path := strings.TrimSpace(parts[1])
 	path = strings.Trim(path, "\"")
-	events, err := e.store.EventsByPath(ctx, path, 200)
+	events, err := e.store.Query(ctx, storage.Filter{ExactPath: path, OrderAsc: true, Limit: 200})
 	if err != nil {
 		return Result{}, err
 	}

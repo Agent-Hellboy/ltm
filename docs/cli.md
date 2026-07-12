@@ -103,7 +103,8 @@ ltm sql                                   # print schema
 ### `prune`
 
 ```bash
-ltm prune --older-than 720h    # default 30 days; then VACUUM
+ltm prune --older-than 720h            # default 30 days
+ltm prune --older-than 720h --vacuum   # also reclaim disk space (rewrites the whole file; slow on large stores)
 ```
 
 ### `benchmark`
