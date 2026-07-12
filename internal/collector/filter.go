@@ -15,7 +15,9 @@ var defaultIgnorePaths = []string{
 }
 
 func newIgnoreRules(extra []string) []string {
-	return normalizeIgnoreRules(append(defaultIgnorePaths, extra...))
+	rules := append([]string{}, defaultIgnorePaths...)
+	rules = append(rules, extra...)
+	return normalizeIgnoreRules(rules)
 }
 
 func shouldIgnorePath(rules []string, path string) bool {

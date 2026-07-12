@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"ltm/internal/abi"
 	"ltm/internal/storage"
 )
 
@@ -53,7 +52,6 @@ func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event, dr
 			if !ok {
 				return flush(ctx)
 			}
-			ev.SchemaVersion = abi.SchemaVersion
 			batch = append(batch, ev)
 			if len(batch) >= s.cfg.BatchSize {
 				if err := flush(ctx); err != nil {

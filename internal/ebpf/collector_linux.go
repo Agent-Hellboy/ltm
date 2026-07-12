@@ -72,6 +72,7 @@ func (c collector) Run(ctx context.Context, out chan<- storage.Event) error {
 	defer reader.Close()
 
 	var dropped uint64
+	var decodeErrors uint64
 
 	go func() {
 		<-ctx.Done()
@@ -92,6 +93,8 @@ func (c collector) Run(ctx context.Context, out chan<- storage.Event) error {
 		}
 		ke, err := decodeKernelEvent(record.RawSample)
 		if err != nil {
+			decodeErrors++
+			fmt.Fprintf(os.Stderr, "ltm: dropped malformed kernel event (%d so far): %v\n", decodeErrors, err)
 			continue
 		}
 		ev := convertKernelEvent(bootTime, ke, dropped)
