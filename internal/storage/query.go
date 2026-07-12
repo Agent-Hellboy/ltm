@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -62,37 +63,12 @@ func (s *Store) EventsAfterID(ctx context.Context, afterID int64, limit int) ([]
 		`SELECT `+eventColumns+` FROM events WHERE id > ? ORDER BY id ASC LIMIT ?`, afterID, limit)
 }
 
-// EventsBetween returns events in [from, to], oldest first.
-func (s *Store) EventsBetween(ctx context.Context, from, to time.Time, limit int) ([]Event, error) {
-	if limit <= 0 {
-		limit = 500
-	}
-	return s.queryEvents(ctx,
-		`SELECT `+eventColumns+` FROM events WHERE ts >= ? AND ts <= ? ORDER BY ts ASC, id ASC LIMIT ?`,
-		from.UnixNano(), to.UnixNano(), limit)
-}
-
-// EventsByPID returns events for a pid, oldest first.
-func (s *Store) EventsByPID(ctx context.Context, pid int, limit int) ([]Event, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	return s.queryEvents(ctx,
-		`SELECT `+eventColumns+` FROM events WHERE pid = ? ORDER BY ts ASC, id ASC LIMIT ?`, pid, limit)
-}
-
-// EventsByPath returns events touching a path (as path or old_path), oldest first.
-func (s *Store) EventsByPath(ctx context.Context, path string, limit int) ([]Event, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	return s.queryEvents(ctx,
-		`SELECT `+eventColumns+` FROM events WHERE path = ? OR old_path = ? ORDER BY ts ASC, id ASC LIMIT ?`,
-		path, path, limit)
-}
-
-// Query runs an arbitrary logical-AND Filter over the event log, newest first.
+// Query runs an arbitrary logical-AND Filter over the event log. Results are
+// newest first unless f.OrderAsc is set.
 func (s *Store) Query(ctx context.Context, f Filter) ([]Event, error) {
+	if err := f.Validate(); err != nil {
+		return nil, err
+	}
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 200
@@ -138,19 +114,27 @@ func (s *Store) Query(ctx context.Context, f Filter) ([]Event, error) {
 		}
 	}
 	if f.PathLike != "" {
-		where = append(where, "path LIKE ?")
-		args = append(args, f.PathLike)
+		where = append(where, "(path LIKE ? OR old_path LIKE ?)")
+		args = append(args, f.PathLike, f.PathLike)
 	}
 	if f.ExeLike != "" {
 		where = append(where, "exe LIKE ?")
 		args = append(args, f.ExeLike)
+	}
+	if f.ExactPath != "" {
+		where = append(where, "(path = ? OR old_path = ?)")
+		args = append(args, f.ExactPath, f.ExactPath)
 	}
 
 	query := `SELECT ` + eventColumns + ` FROM events`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
-	query += " ORDER BY ts DESC, id DESC LIMIT ?"
+	if f.OrderAsc {
+		query += " ORDER BY ts ASC, id ASC LIMIT ?"
+	} else {
+		query += " ORDER BY ts DESC, id DESC LIMIT ?"
+	}
 	args = append(args, limit)
 	return s.queryEvents(ctx, query, args...)
 }
@@ -236,12 +220,24 @@ func (s *Store) Sockets(ctx context.Context, limit int) ([]SocketRecord, error) 
 	return out, rows.Err()
 }
 
-// RawSQL executes an arbitrary read-only query and returns column names plus
-// rows as generic values, for `ltm sql`. Callers must use a read-only Store
-// (query_only=ON) so writes fail at the SQLite layer.
+// maxRawSQLRows bounds how many rows RawSQL materializes in memory. Without a
+// cap, a query like "SELECT * FROM events" against a long-running recorder's
+// full log could allocate proportional to the entire event count.
+const maxRawSQLRows = 10_000
+
+// RawSQL executes a single arbitrary read-only statement and returns column
+// names plus rows as generic values, for `ltm sql`. Callers must use a
+// read-only Store (query_only=ON) so writes fail at the SQLite layer. Multiple
+// statements are rejected outright: the underlying driver runs a
+// semicolon-separated string as a script, so without this check an input like
+// "SELECT 1; PRAGMA query_only=OFF; DELETE FROM events" would flip off the
+// read-only guard mid-script and let the DELETE through on a "read-only" Store.
 func (s *Store) RawSQL(ctx context.Context, query string) ([]string, [][]any, error) {
 	if !s.readOnly {
 		return nil, nil, errors.New("raw SQL requires read-only store")
+	}
+	if hasMultipleStatements(query) {
+		return nil, nil, errors.New("raw SQL must be a single statement")
 	}
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
@@ -254,6 +250,9 @@ func (s *Store) RawSQL(ctx context.Context, query string) ([]string, [][]any, er
 	}
 	var out [][]any
 	for rows.Next() {
+		if len(out) >= maxRawSQLRows {
+			return nil, nil, fmt.Errorf("raw SQL result has more than %d rows; add a LIMIT to the query", maxRawSQLRows)
+		}
 		vals := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
 		for i := range vals {
@@ -265,4 +264,74 @@ func (s *Store) RawSQL(ctx context.Context, query string) ([]string, [][]any, er
 		out = append(out, vals)
 	}
 	return cols, out, rows.Err()
+}
+
+// hasMultipleStatements reports whether sql contains a statement separator
+// (';') outside quotes/comments/parens, other than a single trailing
+// terminator. It walks the string once so quoted strings, bracketed
+// identifiers, and comments containing ';' don't produce false positives.
+func hasMultipleStatements(sql string) bool {
+	depth := 0
+	for i := 0; i < len(sql); {
+		switch c := sql[i]; {
+		case c == '\'':
+			i = skipQuoted(sql, i+1, '\'')
+		case c == '"':
+			i = skipQuoted(sql, i+1, '"')
+		case c == '[':
+			i = skipUntil(sql, i+1, ']')
+		case c == '-' && i+1 < len(sql) && sql[i+1] == '-':
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			i += 2
+			for i+1 < len(sql) && !(sql[i] == '*' && sql[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(sql) {
+				i += 2
+			}
+		case c == '(':
+			depth++
+			i++
+		case c == ')':
+			if depth > 0 {
+				depth--
+			}
+			i++
+		case c == ';':
+			if strings.TrimSpace(sql[i+1:]) != "" {
+				return true
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return false
+}
+
+func skipQuoted(sql string, i int, quote byte) int {
+	for i < len(sql) {
+		if sql[i] == quote {
+			if i+1 < len(sql) && sql[i+1] == quote {
+				i += 2
+				continue
+			}
+			return i + 1
+		}
+		i++
+	}
+	return len(sql)
+}
+
+func skipUntil(sql string, i int, end byte) int {
+	for i < len(sql) && sql[i] != end {
+		i++
+	}
+	if i < len(sql) {
+		return i + 1
+	}
+	return len(sql)
 }

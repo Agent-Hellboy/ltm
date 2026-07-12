@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -62,7 +63,29 @@ type Filter struct {
 	Categories []string
 	Actions    []string
 	Comms      []string
-	PathLike   string
-	ExeLike    string
-	Limit      int
+	// PathLike matches events whose path or old_path matches this SQL LIKE
+	// pattern (% wildcard), so a rename is found by either its old or new name.
+	PathLike string
+	ExeLike  string
+	// ExactPath matches events whose path or old_path equals this value
+	// exactly (e.g. "who touched this file"), distinct from the PathLike
+	// wildcard filter above.
+	ExactPath string
+	// OrderAsc returns oldest-first instead of Query's default newest-first,
+	// for timelines and diffs that read chronologically.
+	OrderAsc bool
+	Limit    int
+}
+
+// Validate rejects a Filter that can't produce a sensible result: an inverted
+// time range (From after To) always matches nothing, and a negative Limit
+// isn't a valid SQL LIMIT.
+func (f Filter) Validate() error {
+	if !f.From.IsZero() && !f.To.IsZero() && f.From.After(f.To) {
+		return errors.New("filter: From must not be after To")
+	}
+	if f.Limit < 0 {
+		return errors.New("filter: Limit must not be negative")
+	}
+	return nil
 }

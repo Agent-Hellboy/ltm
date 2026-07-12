@@ -35,7 +35,7 @@ Add `--json` to any read command for machine-readable output.
 | `diff --from --to` | machine-state changes between two times |
 | `query "<question>"` | plain English (templates, or an agent → SQL) |
 | `query sql ["<SELECT>"]` | read-only SQL; no arg prints the schema (`ltm sql` works too) |
-| `prune --older-than 720h` | drop old rows and `VACUUM` |
+| `prune --older-than 720h [--vacuum]` | drop old rows, optionally reclaiming disk space |
 | `benchmark --count N` | write N synthetic events (no eBPF) |
 | `version` | build version, commit, platform |
 

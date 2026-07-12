@@ -26,13 +26,13 @@ func (s *Store) InsertEvents(ctx context.Context, events []Event) (InsertStats, 
 	if err != nil {
 		return InsertStats{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO events (`+insertColumns+`) VALUES (`+insertPlaceholders+`)`)
 	if err != nil {
 		return InsertStats{}, err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	var dropped int64
 	for _, ev := range events {

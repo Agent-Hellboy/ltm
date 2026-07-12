@@ -67,8 +67,11 @@ not hand-edited. CI rebuilds too. No simulated collector — use
 `ltm benchmark`.
 
 **Agent.** `LTM_AGENT` / `--agent`: `claude|codex|cursor|gemini|auto|<custom>`.
-SQL runs only via `OpenReadOnly` + `RawSQL`; `ExtractSQL` rejects non-SELECT /
-multi-statement. Agent failure → stderr warning + `internal/query` templates.
+SQL runs only via `OpenReadOnly` + `RawSQL`; `RawSQL` itself rejects any
+multi-statement input (a lone `PRAGMA query_only=OFF` chained before a write
+would otherwise defeat the read-only guard mid-script), and `ExtractSQL`
+additionally rejects non-SELECT agent output. Agent failure → stderr warning +
+`internal/query` templates.
 Unit tests use fake shell scripts — never call a real agent CLI.
 
 **Style.** Small focused diffs; extend existing engines; metadata only (no file
