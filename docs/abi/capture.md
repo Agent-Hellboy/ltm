@@ -5,8 +5,10 @@ the Go loader in `internal/ebpf`.
 
 It is narrower than the persisted SQL schema ABI. This contract matters to
 contributors changing the capture inputs or loader behavior. In practice that
-means `collector.bpf.c`, `internal/abi/abi.yaml`, and `real_linux.go`; the
-generated files they produce are part of the contract but are not hand-edited.
+means `collector.bpf.c`, `internal/abi/abi.yaml`, and the Linux loader
+(`collector_linux.go`, `attach_linux.go`, `decode_linux.go`, `proc_linux.go`);
+the generated files they produce are part of the contract but are not
+hand-edited.
 
 ## Scope
 
@@ -30,7 +32,8 @@ Primary source inputs:
 
 - `internal/abi/abi.yaml`
 - `internal/ebpf/collector.bpf.c`
-- `internal/ebpf/real_linux.go`
+- `internal/ebpf/collector_linux.go`, `internal/ebpf/attach_linux.go`,
+  `internal/ebpf/decode_linux.go`, `internal/ebpf/proc_linux.go`
 
 Generated artifacts:
 
@@ -124,7 +127,7 @@ Rule:
 
 Each emitted perf sample must match the binary layout defined in
 `internal/abi/kernel_event.gen.h` and expected by
-`internal/ebpf/real_linux.go`.
+`internal/ebpf/decode_linux.go`.
 
 Current logical fields:
 

@@ -144,10 +144,14 @@ func TestParseGlobalFlagsAfterSubcommand(t *testing.T) {
 	}
 }
 
-func TestParseGlobalFlagsPreservesCommandFlags(t *testing.T) {
+func TestParseGlobalFlagsStopsAtFirstUnrecognizedFlag(t *testing.T) {
 	t.Parallel()
 	cfg := defaultConfig()
 
+	// A command-specific flag (e.g. daemon's --foreground) must not be
+	// scanned through to find a global flag placed after it — global flags
+	// only apply from the head of the args, matching stdlib flag.Parse
+	// semantics that every subcommand's own flag.FlagSet already relies on.
 	rest, err := parseGlobalFlags([]string{"--db", "/tmp/one.db", "--foreground", "--json"}, &cfg)
 	if err != nil {
 		t.Fatalf("parseGlobalFlags: %v", err)
@@ -156,11 +160,83 @@ func TestParseGlobalFlagsPreservesCommandFlags(t *testing.T) {
 	if cfg.DBPath != "/tmp/one.db" {
 		t.Fatalf("DBPath = %q, want /tmp/one.db", cfg.DBPath)
 	}
-	if !cfg.JSON {
-		t.Fatal("JSON flag was not applied")
+	if cfg.JSON {
+		t.Fatal("JSON flag should not be applied once scanning stops at --foreground")
 	}
-	if !reflect.DeepEqual(rest, []string{"--foreground"}) {
-		t.Fatalf("rest = %#v, want %#v", rest, []string{"--foreground"})
+	if !reflect.DeepEqual(rest, []string{"--foreground", "--json"}) {
+		t.Fatalf("rest = %#v, want %#v", rest, []string{"--foreground", "--json"})
+	}
+}
+
+func TestParseGlobalFlagsDoesNotConsumeFreeTextArguments(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	cfg.DBPath = "/tmp/default.db"
+
+	// A `query` question containing flag-shaped words must pass through
+	// untouched instead of being mistaken for global flags anywhere in it.
+	rest, err := parseGlobalFlags([]string{"what", "changed", "under", "--db", "recently"}, &cfg)
+	if err != nil {
+		t.Fatalf("parseGlobalFlags: %v", err)
+	}
+	if cfg.DBPath != "/tmp/default.db" {
+		t.Fatalf("DBPath = %q, want unchanged default", cfg.DBPath)
+	}
+	want := []string{"what", "changed", "under", "--db", "recently"}
+	if !reflect.DeepEqual(rest, want) {
+		t.Fatalf("rest = %#v, want %#v", rest, want)
+	}
+}
+
+func TestParseGlobalFlagsSingleDash(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+
+	rest, err := parseGlobalFlags([]string{"-db", "/tmp/one.db", "-json", "status"}, &cfg)
+	if err != nil {
+		t.Fatalf("parseGlobalFlags: %v", err)
+	}
+	if cfg.DBPath != "/tmp/one.db" {
+		t.Fatalf("DBPath = %q, want /tmp/one.db", cfg.DBPath)
+	}
+	if !cfg.JSON {
+		t.Fatal("JSON flag was not applied via single-dash -json")
+	}
+	if !reflect.DeepEqual(rest, []string{"status"}) {
+		t.Fatalf("rest = %#v, want %#v", rest, []string{"status"})
+	}
+}
+
+func TestParseGlobalFlagsJSONEqualsBoolValue(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	cfg.JSON = true
+
+	rest, err := parseGlobalFlags([]string{"--json=false", "prune"}, &cfg)
+	if err != nil {
+		t.Fatalf("parseGlobalFlags: %v", err)
+	}
+	if cfg.JSON {
+		t.Fatal("--json=false should clear JSON")
+	}
+	if !reflect.DeepEqual(rest, []string{"prune"}) {
+		t.Fatalf("rest = %#v, want %#v", rest, []string{"prune"})
+	}
+}
+
+func TestRunWatchRejectsNonPositiveInterval(t *testing.T) {
+	t.Parallel()
+	cfg := defaultConfig()
+	cfg.DBPath = filepath.Join(t.TempDir(), "missing.db")
+
+	for _, interval := range []string{"0", "-1s"} {
+		err := runWatch(cfg, []string{"--interval", interval})
+		if err == nil {
+			t.Fatalf("runWatch(--interval %s) = nil error, want a usage error", interval)
+		}
+		if !strings.Contains(err.Error(), "interval must be positive") {
+			t.Fatalf("runWatch(--interval %s) error = %q, want it to mention a positive interval", interval, err)
+		}
 	}
 }
 

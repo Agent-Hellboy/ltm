@@ -6,48 +6,93 @@ import (
 	"strings"
 )
 
+// parseGlobalFlags recognizes global flags at the head of args and stops at
+// the first token that isn't one of them — exactly like the stdlib flag
+// package's own parsing, which every subcommand's flag.FlagSet already relies
+// on. Stopping early (rather than scanning the whole slice) means flag-shaped
+// words inside a subcommand's own positional arguments, such as a `query`
+// question containing "--db", are never mistaken for global flags. Both
+// "-name" and "--name" spellings are accepted, matching how the stdlib flag
+// package treats single and double dashes as equivalent.
 func parseGlobalFlags(args []string, cfg *Config) ([]string, error) {
-	rest := make([]string, 0, len(args))
 	cfg.IgnorePaths = append([]string{}, cfg.IgnorePaths...)
 
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--":
-			rest = append(rest, args[i:]...)
-			return rest, nil
-		case arg == "--json":
-			cfg.JSON = true
-		case arg == "--db":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("flag needs an argument: %s", arg)
+	i := 0
+loop:
+	for ; i < len(args); i++ {
+		name, value, hasValue := splitFlag(args[i])
+		switch name {
+		case "json":
+			if hasValue {
+				b, err := strconv.ParseBool(value)
+				if err != nil {
+					return nil, fmt.Errorf("invalid boolean value %q for -json", value)
+				}
+				cfg.JSON = b
+			} else {
+				cfg.JSON = true
 			}
-			i++
-			cfg.DBPath = args[i]
-		case strings.HasPrefix(arg, "--db="):
-			cfg.DBPath = strings.TrimPrefix(arg, "--db=")
-		case arg == "--pidfile":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("flag needs an argument: %s", arg)
+		case "db":
+			v, err := flagValue(args, &i, name, value, hasValue)
+			if err != nil {
+				return nil, err
 			}
-			i++
-			cfg.PIDFile = args[i]
-		case strings.HasPrefix(arg, "--pidfile="):
-			cfg.PIDFile = strings.TrimPrefix(arg, "--pidfile=")
-		case arg == "--ignore-path":
-			if i+1 >= len(args) {
-				return nil, fmt.Errorf("flag needs an argument: %s", arg)
+			cfg.DBPath = v
+		case "pidfile":
+			v, err := flagValue(args, &i, name, value, hasValue)
+			if err != nil {
+				return nil, err
 			}
-			i++
-			cfg.IgnorePaths = append(cfg.IgnorePaths, args[i])
-		case strings.HasPrefix(arg, "--ignore-path="):
-			cfg.IgnorePaths = append(cfg.IgnorePaths, strings.TrimPrefix(arg, "--ignore-path="))
+			cfg.PIDFile = v
+		case "ignore-path":
+			v, err := flagValue(args, &i, name, value, hasValue)
+			if err != nil {
+				return nil, err
+			}
+			cfg.IgnorePaths = append(cfg.IgnorePaths, v)
 		default:
-			rest = append(rest, arg)
+			// Not a recognized global flag (including "--" and bare "-"):
+			// stop here and pass everything from here on through unchanged.
+			break loop
 		}
 	}
 
-	return rest, nil
+	return append([]string{}, args[i:]...), nil
+}
+
+// splitFlag reports whether arg is a "-name" or "--name" style flag, and
+// splits out an "=value" suffix if present. name is empty if arg is not
+// flag-shaped.
+func splitFlag(arg string) (name, value string, hasValue bool) {
+	switch {
+	case strings.HasPrefix(arg, "--"):
+		arg = arg[2:]
+	case strings.HasPrefix(arg, "-") && arg != "-":
+		arg = arg[1:]
+	default:
+		return "", "", false
+	}
+	if arg == "" {
+		return "", "", false // bare "--"
+	}
+	if before, after, found := strings.Cut(arg, "="); found {
+		return before, after, true
+	}
+	return arg, "", false
+}
+
+// flagValue resolves the value for a non-boolean flag, either inline
+// ("-name=value") or as the next argument ("-name value"), advancing *i past
+// whichever tokens it consumed.
+func flagValue(args []string, i *int, name, inlineValue string, hasInline bool) (string, error) {
+	if hasInline {
+		return inlineValue, nil
+	}
+	if *i+1 >= len(args) {
+		return "", fmt.Errorf("flag needs an argument: -%s", name)
+	}
+	*i++
+	return args[*i], nil
 }
 
 type multiStringFlag struct {

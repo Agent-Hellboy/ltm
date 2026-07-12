@@ -56,7 +56,8 @@ helpers. `DroppedBefore` is additive (`SUM`); do not overwrite. `watch` uses
 `EventsAfterID` / `LatestEventID` — keep them id-ordered and cheap.
 
 **eBPF.** Handwritten inputs: `collector.bpf.c`, `internal/abi/abi.yaml`,
-loader `real_linux.go`, stub `real_stub.go`. Generated outputs:
+loader `collector_linux.go`/`attach_linux.go`/`decode_linux.go`/`proc_linux.go`,
+stub `collector_stub.go`. Generated outputs:
 `internal/abi/kernel_event.gen.h`, `internal/abi/tracepoints_gen.go`,
 embedded object `collector_bpfel.o`, Go bindings `collector_bpfel.go`. x86_64
 only (`__TARGET_ARCH_x86`). Headers under `headers/` are minimal stubs. Run

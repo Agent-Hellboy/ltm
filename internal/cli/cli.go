@@ -41,8 +41,16 @@ func defaultConfig() Config {
 
 func Execute() error {
 	cfg := defaultConfig()
+	// Strip global flags (single- or double-dash) ourselves before handing
+	// off to cobra: pflag only recognizes multi-character "--name" flags,
+	// not "-name", so a leading "-db" would otherwise reach cobra's own
+	// root-level flag routing and fail before parseGlobalFlags ever saw it.
+	rest, err := parseGlobalFlags(os.Args[1:], &cfg)
+	if err != nil {
+		return err
+	}
 	root := newRootCmd(&cfg)
-	root.SetArgs(os.Args[1:])
+	root.SetArgs(rest)
 	return root.Execute()
 }
 
@@ -69,8 +77,11 @@ func newRootCmd(cfg *Config) *cobra.Command {
 	root.PersistentFlags().StringVar(&cfg.DBPath, "db", cfg.DBPath, "storage path")
 	root.PersistentFlags().StringVar(&cfg.PIDFile, "pidfile", cfg.PIDFile, "pid file path")
 	root.PersistentFlags().BoolVar(&cfg.JSON, "json", cfg.JSON, "json output")
-	root.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "print version")
 	root.PersistentFlags().Var(&ignore, "ignore-path", "path prefix to ignore")
+	// Local (not persistent): --version only makes sense at the root, and
+	// DisableFlagParsing on every subcommand means it wouldn't work there
+	// anyway — PersistentFlags would falsely advertise it as inherited.
+	root.Flags().BoolVarP(&showVersion, "version", "v", false, "print version")
 
 	root.AddCommand(
 		newPassthroughCmd("start", "begin recording (eBPF; requires root)", cfg, runStart),

@@ -15,32 +15,6 @@ import (
 	"ltm/internal/storage"
 )
 
-func printRootHelp(w io.Writer) {
-	fmt.Fprintln(w, "ltm - Linux Time Machine")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  ltm [global flags] <command> [command flags]")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Commands:")
-	fmt.Fprintln(w, "  start      begin recording (eBPF; requires root)")
-	fmt.Fprintln(w, "  stop")
-	fmt.Fprintln(w, "  status")
-	fmt.Fprintln(w, "  timeline   [--since] [--until] [--pid] [--uid] [--comm] [--category] [--action] [--path] [--exe] [--limit]")
-	fmt.Fprintln(w, "  diff")
-	fmt.Fprintln(w, "  watch      [--interval] [--since] [--category] [--comm] [--pid]  (live tail)")
-	fmt.Fprintln(w, "  query      \"<plain English question>\" [--agent claude|codex|cursor|gemini|auto]  (env LTM_AGENT)")
-	fmt.Fprintln(w, "  query sql  [\"<SELECT ...>\"]  (run with no query to print the schema; ltm sql also works)")
-	fmt.Fprintln(w, "  prune      [--older-than]")
-	fmt.Fprintln(w, "  benchmark")
-	fmt.Fprintln(w, "  version")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Global flags (before the command):")
-	fmt.Fprintln(w, "  --db <path>           storage database (default ~/.local/share/ltm/ltm.db)")
-	fmt.Fprintln(w, "  --pidfile <path>      pid file (default ~/.local/run/ltm.pid)")
-	fmt.Fprintln(w, "  --json                machine-readable output for read commands")
-	fmt.Fprintln(w, "  --ignore-path <p>     extra path prefix to skip while recording (repeatable)")
-}
-
 func printVersion(w io.Writer, jsonOut bool) error {
 	info := map[string]string{
 		"version": Version,

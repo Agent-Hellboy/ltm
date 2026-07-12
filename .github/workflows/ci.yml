@@ -24,6 +24,8 @@ jobs:
           git diff --exit-code -- internal/abi internal/storage/schema_gen.go
       - name: Run unit tests
         run: go test ./...
+      - name: Cross-compile non-Linux build (stub collector path)
+        run: GOOS=darwin CGO_ENABLED=0 go build ./...
 
   integration:
     name: integration (ubuntu)

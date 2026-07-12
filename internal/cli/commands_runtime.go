@@ -171,6 +171,9 @@ func runWatch(cfg Config, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *interval <= 0 {
+		return fmt.Errorf("watch --interval must be positive, got %s", interval)
+	}
 	store, err := storage.OpenReadOnly(cfg.DBPath)
 	if err != nil {
 		return err
