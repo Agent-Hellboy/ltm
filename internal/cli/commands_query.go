@@ -148,7 +148,9 @@ func execReadOnlySQL(cfg Config, query string, jsonOut bool) error {
 		return err
 	}
 	defer store.Close()
-	cols, rows, err := store.RawSQL(context.Background(), query)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cols, rows, err := store.RawSQL(ctx, query)
 	if err != nil {
 		return err
 	}

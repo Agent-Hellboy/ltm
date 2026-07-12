@@ -35,6 +35,9 @@ func runStart(cfg Config, args []string) error {
 	if err != nil {
 		return err
 	}
+	//nolint:noctx // intentionally not context-bound: Setsid below detaches this
+	// process so the recorder outlives the launching command; a context-bound
+	// exec.CommandContext would kill it the moment this process's ctx ends.
 	cmd := exec.Command(exe, daemonArgs(cfg)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -109,7 +112,7 @@ func runTimeline(cfg Config, args []string) error {
 	jsonOut := fs.Bool("json", cfg.JSON, "json output")
 	var pids, uids multiIntFlag
 	var categories, actions, comms multiStringFlag
-	pathLike := fs.String("path", "", "filter by path (SQL LIKE pattern, % wildcard)")
+	pathLike := fs.String("path", "", "filter by path or old_path, e.g. a rename's prior name (SQL LIKE pattern, % wildcard)")
 	exeLike := fs.String("exe", "", "filter by exe (SQL LIKE pattern, % wildcard)")
 	fs.Var(&pids, "pid", "filter by pid (repeatable)")
 	fs.Var(&uids, "uid", "filter by uid (repeatable)")
@@ -190,7 +193,7 @@ func runWatch(cfg Config, args []string) error {
 		if err != nil {
 			return err
 		}
-		events, err := store.EventsBetween(ctx, start, time.Now(), *limit)
+		events, err := store.Query(ctx, storage.Filter{From: start, To: time.Now(), OrderAsc: true, Limit: *limit})
 		if err != nil {
 			return err
 		}
@@ -298,6 +301,7 @@ func runBenchmark(cfg Config, args []string) error {
 func runPrune(cfg Config, args []string) error {
 	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
 	olderThan := fs.String("older-than", "720h", "delete events older than this duration or absolute time")
+	vacuum := fs.Bool("vacuum", false, "reclaim disk space with VACUUM after deleting (rewrites the whole database file; slow on large stores)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -310,7 +314,7 @@ func runPrune(cfg Config, args []string) error {
 	if err != nil {
 		return err
 	}
-	n, err := store.Prune(context.Background(), cutoff)
+	n, err := store.Prune(context.Background(), cutoff, *vacuum)
 	if err != nil {
 		return err
 	}
