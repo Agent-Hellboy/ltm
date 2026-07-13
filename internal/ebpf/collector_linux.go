@@ -73,7 +73,6 @@ func (c collector) Run(ctx context.Context, out chan<- storage.Event) error {
 
 	var lastKernelDropped uint64
 	var decodeErrors uint64
-	var recordsSinceDropCheck int
 
 	go func() {
 		<-ctx.Done()
@@ -94,14 +93,9 @@ func (c collector) Run(ctx context.Context, out chan<- storage.Event) error {
 			fmt.Fprintf(os.Stderr, "ltm: dropped malformed kernel event (%d so far): %v\n", decodeErrors, err)
 			continue
 		}
-		var dropped uint64
-		recordsSinceDropCheck++
-		if recordsSinceDropCheck >= 256 {
-			kernelDropped := readRingbufDrops(coll)
-			dropped = kernelDropped - lastKernelDropped
-			lastKernelDropped = kernelDropped
-			recordsSinceDropCheck = 0
-		}
+		kernelDropped := readRingbufDrops(coll)
+		dropped := kernelDropped - lastKernelDropped
+		lastKernelDropped = kernelDropped
 		ev := convertKernelEvent(bootTime, ke, dropped)
 		select {
 		case out <- ev:
