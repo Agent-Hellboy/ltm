@@ -15,6 +15,13 @@ type Config struct {
 	FlushPeriod time.Duration
 }
 
+const (
+	defaultBatchSize         = 4096
+	defaultMaxFlushBatchSize = 16384
+	defaultIngestBufferSize  = 65536
+	defaultSourceBufferSize  = 65536
+)
+
 type Service struct {
 	store *storage.Store
 	cfg   Config
@@ -22,7 +29,7 @@ type Service struct {
 
 func NewService(store *storage.Store, cfg Config) *Service {
 	if cfg.BatchSize <= 0 {
-		cfg.BatchSize = 128
+		cfg.BatchSize = defaultBatchSize
 	}
 	if cfg.FlushPeriod <= 0 {
 		cfg.FlushPeriod = 1 * time.Second
@@ -38,10 +45,10 @@ func (s *Service) runWithSource(ctx context.Context, src ebpf.EventSource) error
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	ingest := make(chan storage.Event, 2048)
+	ingest := make(chan storage.Event, defaultIngestBufferSize)
 	col := collector.New(collector.Config{
 		IgnorePaths: s.cfg.IgnorePaths,
-		BufferSize:  1024,
+		BufferSize:  defaultSourceBufferSize,
 	})
 
 	colErr := make(chan error, 1)

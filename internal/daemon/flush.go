@@ -28,6 +28,20 @@ func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event, dr
 		batch = batch[:0]
 		return err
 	}
+	drainReady := func() bool {
+		for len(batch) < defaultMaxFlushBatchSize {
+			select {
+			case ev, ok := <-ingest:
+				if !ok {
+					return false
+				}
+				batch = append(batch, ev)
+			default:
+				return true
+			}
+		}
+		return true
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -54,6 +68,9 @@ func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event, dr
 			}
 			batch = append(batch, ev)
 			if len(batch) >= s.cfg.BatchSize {
+				if !drainReady() {
+					return flush(ctx)
+				}
 				if err := flush(ctx); err != nil {
 					return err
 				}

@@ -8,11 +8,11 @@
 
 typedef struct ltm_kernel_event event;
 
-// Force bpf2go to emit a Go type for the event layout. The events perf-event
-// array carries no BTF value type, so without a by-value reference nothing
-// pulls the struct into the generated bindings and the Go mirror could drift
-// again. Must be by value: bpf2go only generates Go structs for types used by
-// value, not for a bare pointer's pointee.
+// Force bpf2go to emit a Go type for the event layout. The events ring buffer
+// carries no BTF value type, so without a by-value reference nothing pulls the
+// struct into the generated bindings and the Go mirror could drift again. Must
+// be by value: bpf2go only generates Go structs for types used by value, not
+// for a bare pointer's pointee.
 const event _ltm_unused_event __attribute__((unused));
 
 struct path_state {
@@ -94,7 +94,8 @@ struct trace_block_rq_issue {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 1 << 24);
 } events SEC(".maps");
 
 struct {
@@ -120,10 +121,10 @@ struct {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(key_size, sizeof(__u32));
-	__uint(value_size, sizeof(event));
+	__type(key, __u32);
+	__type(value, __u64);
 	__uint(max_entries, 1);
-} scratch SEC(".maps");
+} ringbuf_drops SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -188,14 +189,22 @@ static __always_inline void set_category_action(event *ev, const char *category,
 	__builtin_memcpy(ev->action, action, 16);
 }
 
-static __always_inline void submit(void *ctx, event *ev) {
-	bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, ev, sizeof(*ev));
+static __always_inline void count_ringbuf_drop(void) {
+	__u32 zero = 0;
+	__u64 *drops = bpf_map_lookup_elem(&ringbuf_drops, &zero);
+	if (drops) {
+		__sync_fetch_and_add(drops, 1);
+	}
+}
+
+static __always_inline void submit(event *ev) {
+	bpf_ringbuf_submit(ev, 0);
 }
 
 static __always_inline event *reserve_event(void) {
-	__u32 zero = 0;
-	event *ev = bpf_map_lookup_elem(&scratch, &zero);
+	event *ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
 	if (!ev) {
+		count_ringbuf_drop();
 		return 0;
 	}
 	__builtin_memset(ev, 0, sizeof(*ev));
@@ -276,7 +285,7 @@ static __always_inline int emit_event(void *ctx, const char *category, const cha
 	if (old_path) {
 		read_path(ev->old_path, old_path);
 	}
-	submit(ctx, ev);
+	submit(ev);
 	return 0;
 }
 
@@ -304,7 +313,7 @@ static __always_inline int emit_fd_io(void *ctx, const char *category, const cha
 	ev->fd = (__s32)fd;
 	ev->syscall_nr = (__u32)syscall_nr;
 	__builtin_memcpy(ev->path, state->path, sizeof(ev->path));
-	submit(ctx, ev);
+	submit(ev);
 	return 0;
 }
 
@@ -341,7 +350,7 @@ static __always_inline int emit_sockaddr(void *ctx, const char *action, const vo
 		ev->remote_port = __builtin_bswap16(port);
 		ev->remote_ip4 = ip4;
 	}
-	submit(ctx, ev);
+	submit(ev);
 	return 0;
 }
 
@@ -382,7 +391,7 @@ int trace_sched_process_fork(struct trace_sched_process_fork *ctx) {
 	ev->pid = ctx->child_pid;
 	ev->aux = (__u32)ctx->parent_pid;
 	__builtin_memcpy(ev->comm, ctx->child_comm, sizeof(ev->comm));
-	submit(ctx, ev);
+	submit(ev);
 	return 0;
 }
 
@@ -399,7 +408,7 @@ int trace_sched_process_exit(struct trace_sched_process_exit *ctx) {
 	ev->pid = ctx->pid;
 	__builtin_memcpy(ev->comm, ctx->comm, sizeof(ev->comm));
 	set_category_action(ev, "process", "exit");
-	submit(ctx, ev);
+	submit(ev);
 	return 0;
 }
 
@@ -419,7 +428,7 @@ int trace_block_rq_issue(struct trace_block_rq_issue *ctx) {
 	ev->syscall_nr = ctx->nr_sector;
 	__builtin_memcpy(ev->comm, ctx->comm, sizeof(ev->comm));
 	__builtin_memcpy(ev->path, ctx->rwbs, 8);
-	submit(ctx, ev);
+	submit(ev);
 	return 0;
 }
 

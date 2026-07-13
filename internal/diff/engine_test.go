@@ -50,6 +50,16 @@ func TestDiffEngine(t *testing.T) {
 		},
 		{
 			SchemaVersion: abi.SchemaVersion,
+			Timestamp:     base.Add(2*time.Minute + time.Second),
+			Category:      "file",
+			Action:        "write",
+			PID:           1001,
+			PPID:          1,
+			UID:           0,
+			Comm:          "nginx",
+		},
+		{
+			SchemaVersion: abi.SchemaVersion,
 			Timestamp:     base.Add(3 * time.Minute),
 			Category:      "network",
 			Action:        "listen",
@@ -152,5 +162,47 @@ func TestDiffEngine(t *testing.T) {
 
 	if len(report.DeletedFiles) != 1 || report.DeletedFiles[0].Path != "/var/run/nginx" {
 		t.Fatalf("DeletedFiles = %+v, want /var/run/nginx", report.DeletedFiles)
+	}
+}
+
+func TestDiffEngineDoesNotMissChangesAfterNoisyPrefix(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+
+	base := time.Date(2026, 7, 8, 14, 0, 0, 0, time.UTC)
+	events := make([]storage.Event, 0, 6001)
+	for i := 0; i < 6000; i++ {
+		events = append(events, storage.Event{
+			SchemaVersion: abi.SchemaVersion,
+			Timestamp:     base.Add(time.Duration(i) * time.Millisecond),
+			Category:      "network",
+			Action:        "connect",
+			PID:           100,
+			Comm:          "noise",
+			RemoteAddr:    "127.0.0.1",
+			RemotePort:    9,
+		})
+	}
+	events = append(events, storage.Event{
+		SchemaVersion: abi.SchemaVersion,
+		Timestamp:     base.Add(7 * time.Second),
+		Category:      "file",
+		Action:        "rename",
+		PID:           200,
+		Comm:          "mv",
+		Path:          "/tmp/marker.renamed",
+		OldPath:       "/tmp/marker",
+	})
+
+	if _, err := store.InsertEvents(context.Background(), events); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+
+	report, err := NewEngine(store).Diff(context.Background(), base, base.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	if len(report.ModifiedFiles) != 1 || report.ModifiedFiles[0].Path != "/tmp/marker.renamed" {
+		t.Fatalf("ModifiedFiles = %+v, want marker rename after noisy prefix", report.ModifiedFiles)
 	}
 }

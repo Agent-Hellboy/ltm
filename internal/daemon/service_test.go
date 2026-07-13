@@ -96,6 +96,35 @@ func TestFlushLoopDrainsOnShutdown(t *testing.T) {
 	}
 }
 
+func TestFlushLoopDrainsReadyBurstBeforeFlush(t *testing.T) {
+	store := newTestStore(t)
+
+	svc := NewService(store, Config{BatchSize: 2, FlushPeriod: time.Hour})
+	ingest := make(chan storage.Event, 8)
+	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
+	for i := range 5 {
+		ingest <- storage.Event{
+			Timestamp: base.Add(time.Duration(i) * time.Second),
+			Category:  "file",
+			Action:    "write",
+			PID:       i + 1,
+		}
+	}
+	close(ingest)
+
+	if err := svc.flushLoop(context.Background(), ingest, func() int64 { return 0 }); err != nil {
+		t.Fatalf("flushLoop: %v", err)
+	}
+
+	status, err := store.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.EventCount != 5 {
+		t.Fatalf("event count = %d, want 5", status.EventCount)
+	}
+}
+
 func TestRunReturnsFlushError(t *testing.T) {
 	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
 	if err != nil {

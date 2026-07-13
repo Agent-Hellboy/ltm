@@ -68,7 +68,7 @@ type ProcessRestart struct {
 }
 
 func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, error) {
-	events, err := e.store.Query(ctx, storage.Filter{From: from, To: to, OrderAsc: true, Limit: 5000})
+	events, err := e.store.Query(ctx, storage.Filter{From: from, To: to, OrderAsc: true, Limit: 50000})
 	if err != nil {
 		return DiffReport{}, err
 	}
@@ -112,15 +112,19 @@ func (e *Engine) Diff(ctx context.Context, from, to time.Time) (DiffReport, erro
 			}
 		case "file:write", "file:rename", "file:truncate", "file:chmod", "file:chown", "file:mkdir":
 			// Reads are not modifications and are deliberately excluded.
+			path := firstNonEmpty(ev.Path, ev.OldPath)
+			if path == "" {
+				continue
+			}
 			report.ModifiedFiles = append(report.ModifiedFiles, FileChange{
 				Timestamp: ev.Timestamp,
-				Path:      firstNonEmpty(ev.Path, ev.OldPath),
+				Path:      path,
 				Count:     1,
 				Action:    ev.Action,
 			})
 			// Only content writes feed hot-writer detection.
 			if ev.Action == "write" {
-				writes[firstNonEmpty(ev.Path, ev.OldPath)] = append(writes[firstNonEmpty(ev.Path, ev.OldPath)], ev)
+				writes[path] = append(writes[path], ev)
 			}
 		case "file:unlink", "file:rmdir":
 			report.DeletedFiles = append(report.DeletedFiles, FileChange{

@@ -9,7 +9,7 @@ import (
 	"os"
 
 	ciliumebpf "github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 
 	"ltm/internal/storage"
@@ -65,14 +65,15 @@ func (c collector) Run(ctx context.Context, out chan<- storage.Event) error {
 		fmt.Fprintf(os.Stderr, "ltm: ebpf collector attached %d tracepoints, skipped %d\n", attached, skipped)
 	}
 
-	reader, err := perf.NewReader(coll.Maps["events"], 64*4096)
+	reader, err := ringbuf.NewReader(coll.Maps["events"])
 	if err != nil {
-		return fmt.Errorf("create perf reader: %w", err)
+		return fmt.Errorf("create ringbuf reader: %w", err)
 	}
 	defer reader.Close()
 
-	var dropped uint64
+	var lastKernelDropped uint64
 	var decodeErrors uint64
+	var recordsSinceDropCheck int
 
 	go func() {
 		<-ctx.Done()
@@ -82,14 +83,10 @@ func (c collector) Run(ctx context.Context, out chan<- storage.Event) error {
 	for {
 		record, err := reader.Read()
 		if err != nil {
-			if errors.Is(err, perf.ErrClosed) {
+			if errors.Is(err, ringbuf.ErrClosed) {
 				return nil
 			}
 			return err
-		}
-		if record.LostSamples != 0 {
-			dropped += record.LostSamples
-			continue
 		}
 		ke, err := decodeKernelEvent(record.RawSample)
 		if err != nil {
@@ -97,8 +94,15 @@ func (c collector) Run(ctx context.Context, out chan<- storage.Event) error {
 			fmt.Fprintf(os.Stderr, "ltm: dropped malformed kernel event (%d so far): %v\n", decodeErrors, err)
 			continue
 		}
+		var dropped uint64
+		recordsSinceDropCheck++
+		if recordsSinceDropCheck >= 256 {
+			kernelDropped := readRingbufDrops(coll)
+			dropped = kernelDropped - lastKernelDropped
+			lastKernelDropped = kernelDropped
+			recordsSinceDropCheck = 0
+		}
 		ev := convertKernelEvent(bootTime, ke, dropped)
-		dropped = 0
 		select {
 		case out <- ev:
 		case <-ctx.Done():
@@ -115,4 +119,21 @@ func setSelfPID(coll *ciliumebpf.Collection) error {
 	key := uint32(0)
 	pid := uint32(os.Getpid())
 	return pidMap.Update(&key, &pid, ciliumebpf.UpdateAny)
+}
+
+func readRingbufDrops(coll *ciliumebpf.Collection) uint64 {
+	dropMap, ok := coll.Maps["ringbuf_drops"]
+	if !ok {
+		return 0
+	}
+	key := uint32(0)
+	var perCPU []uint64
+	if err := dropMap.Lookup(&key, &perCPU); err != nil {
+		return 0
+	}
+	var total uint64
+	for _, drops := range perCPU {
+		total += drops
+	}
+	return total
 }
