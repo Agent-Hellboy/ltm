@@ -35,6 +35,35 @@ make ebpf                 # after editing collector.bpf.c or abi.yaml (clang, Li
 
 CI: unit tests (Ubuntu), integration (Ubuntu), BPF rebuild + binary build.
 
+## Generated files and tools
+
+Source-of-truth inputs:
+
+- `internal/abi/abi.yaml` for schema, tracepoint metadata, and kernel-event layout
+- `internal/ebpf/collector.bpf.c` for BPF programs and maps
+- `internal/abi/gen/` for the ABI generator
+- `internal/ebpf/gen.go` for the `bpf2go` invocation
+
+Generated outputs are checked in but never hand-edited:
+
+- `internal/abi/kernel_event.gen.h`
+- `internal/abi/schema_gen.go`
+- `internal/abi/tracepoints_gen.go`
+- `internal/storage/schema_gen.go`
+- `internal/ebpf/collector_bpfel.go`
+- `internal/ebpf/collector_bpfel.o`
+
+Commands:
+
+- `make generate` runs `go generate ./internal/abi/` and updates ABI/schema outputs.
+- `make ebpf` runs `make generate`, then `go generate ./internal/ebpf/` through `bpf2go`; it needs Linux/CI clang with a BPF target.
+- `make verify-generated` checks embedded hashes on ABI-generated files and catches hand edits without rebuilding BPF.
+- `go test ./...` also runs generated-file drift tests.
+
+Transport wording: the collector uses `BPF_MAP_TYPE_RINGBUF` plus
+`ringbuf.NewReader`. Kernel reservation failures are counted in the
+`ringbuf_drops` map and attributed to `Event.DroppedBefore` with bounded delay.
+
 ## Hard rules
 
 **CLI.** Global flags before the subcommand. `start` re-execs
@@ -57,14 +86,12 @@ helpers. `DroppedBefore` is additive (`SUM`); do not overwrite. `watch` uses
 
 **eBPF.** Handwritten inputs: `collector.bpf.c`, `internal/abi/abi.yaml`,
 loader `collector_linux.go`/`attach_linux.go`/`decode_linux.go`/`proc_linux.go`,
-stub `collector_stub.go`. Generated outputs:
-`internal/abi/kernel_event.gen.h`, `internal/abi/tracepoints_gen.go`,
-embedded object `collector_bpfel.o`, Go bindings `collector_bpfel.go`. x86_64
-only (`__TARGET_ARCH_x86`). Headers under `headers/` are minimal stubs. Run
-`make generate` after editing ABI/schema/tracepoint metadata; run `make ebpf`
-on Linux after BPF or ABI layout edits. Generated outputs are checked in but
-not hand-edited. CI rebuilds too. No simulated collector — use
-`ltm benchmark`.
+stub `collector_stub.go`. x86_64 only (`__TARGET_ARCH_x86`). Headers under
+`headers/` are minimal stubs. Run `make generate` after editing
+ABI/schema/tracepoint metadata; run `make ebpf` on Linux after BPF or ABI layout
+edits. The kernel-to-userspace event transport is a BPF ring buffer; preserve
+drop accounting when changing it. CI rebuilds too. No simulated collector —
+use `ltm benchmark`.
 
 **Agent.** `LTM_AGENT` / `--agent`: `claude|codex|cursor|gemini|auto|<custom>`.
 SQL runs only via `OpenReadOnly` + `RawSQL`; `RawSQL` itself rejects any

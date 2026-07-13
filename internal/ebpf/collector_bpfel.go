@@ -155,12 +155,12 @@ type collectorProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type collectorMapSpecs struct {
-	Events      *ebpf.MapSpec `ebpf:"events"`
-	FdPath      *ebpf.MapSpec `ebpf:"fd_path"`
-	PathScratch *ebpf.MapSpec `ebpf:"path_scratch"`
-	PendingOpen *ebpf.MapSpec `ebpf:"pending_open"`
-	Scratch     *ebpf.MapSpec `ebpf:"scratch"`
-	SelfPid     *ebpf.MapSpec `ebpf:"self_pid"`
+	Events       *ebpf.MapSpec `ebpf:"events"`
+	FdPath       *ebpf.MapSpec `ebpf:"fd_path"`
+	PathScratch  *ebpf.MapSpec `ebpf:"path_scratch"`
+	PendingOpen  *ebpf.MapSpec `ebpf:"pending_open"`
+	RingbufDrops *ebpf.MapSpec `ebpf:"ringbuf_drops"`
+	SelfPid      *ebpf.MapSpec `ebpf:"self_pid"`
 }
 
 // collectorVariableSpecs contains global variables before they are loaded into the kernel.
@@ -190,12 +190,12 @@ func (o *collectorObjects) Close() error {
 //
 // It can be passed to loadCollectorObjects or ebpf.CollectionSpec.LoadAndAssign.
 type collectorMaps struct {
-	Events      *ebpf.Map `ebpf:"events"`
-	FdPath      *ebpf.Map `ebpf:"fd_path"`
-	PathScratch *ebpf.Map `ebpf:"path_scratch"`
-	PendingOpen *ebpf.Map `ebpf:"pending_open"`
-	Scratch     *ebpf.Map `ebpf:"scratch"`
-	SelfPid     *ebpf.Map `ebpf:"self_pid"`
+	Events       *ebpf.Map `ebpf:"events"`
+	FdPath       *ebpf.Map `ebpf:"fd_path"`
+	PathScratch  *ebpf.Map `ebpf:"path_scratch"`
+	PendingOpen  *ebpf.Map `ebpf:"pending_open"`
+	RingbufDrops *ebpf.Map `ebpf:"ringbuf_drops"`
+	SelfPid      *ebpf.Map `ebpf:"self_pid"`
 }
 
 func (m *collectorMaps) Close() error {
@@ -204,7 +204,7 @@ func (m *collectorMaps) Close() error {
 		m.FdPath,
 		m.PathScratch,
 		m.PendingOpen,
-		m.Scratch,
+		m.RingbufDrops,
 		m.SelfPid,
 	)
 }

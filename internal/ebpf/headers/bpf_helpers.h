@@ -15,14 +15,13 @@ enum bpf_map_type {
 	BPF_MAP_TYPE_UNSPEC = 0,
 	BPF_MAP_TYPE_HASH = 1,
 	BPF_MAP_TYPE_ARRAY = 2,
-	BPF_MAP_TYPE_PERF_EVENT_ARRAY = 4,
 	BPF_MAP_TYPE_PERCPU_HASH = 5,
 	BPF_MAP_TYPE_PERCPU_ARRAY = 6,
+	BPF_MAP_TYPE_RINGBUF = 27,
 };
 
 enum {
 	BPF_ANY = 0,
-	BPF_F_CURRENT_CPU = 0xffffffffULL,
 };
 
 static void *(*bpf_map_lookup_elem)(void *map, const void *key) = (void *)1;
@@ -37,4 +36,5 @@ static long (*bpf_probe_read_user)(void *dst, __u32 size, const void *unsafe_ptr
 static long (*bpf_probe_read_kernel)(void *dst, __u32 size, const void *unsafe_ptr) = (void *)113;
 static long (*bpf_probe_read_user_str)(void *dst, __u32 size, const void *unsafe_ptr) = (void *)114;
 static long (*bpf_probe_read_kernel_str)(void *dst, __u32 size, const void *unsafe_ptr) = (void *)115;
-static long (*bpf_perf_event_output)(void *ctx, void *map, __u64 flags, void *data, __u32 size) = (void *)25;
+static void *(*bpf_ringbuf_reserve)(void *ringbuf, __u64 size, __u64 flags) = (void *)131;
+static void (*bpf_ringbuf_submit)(void *data, __u64 flags) = (void *)132;

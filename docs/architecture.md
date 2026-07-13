@@ -23,7 +23,7 @@ eBPF tracepoints ──▶ ebpf.EventSource ──▶ collector ──▶ daemon
 | Batch | `internal/daemon` | `flushLoop` writes batches in one transaction. On shutdown: stop sources, drain the buffer, flush with a **fresh** context (the cancelled run ctx must not abort the final write), then return so the caller can close the store. |
 | Store | `internal/storage` | SQLite (`modernc.org/sqlite`, no CGo). Daemon holds the only writer (`Open`, WAL, `MaxOpenConns(1)`). Every read path uses `OpenReadOnly` + `PRAGMA query_only=ON`. |
 
-`Event.DroppedBefore` attributes kernel perf-buffer loss and collector overflow
+`Event.DroppedBefore` attributes kernel ring-buffer loss and collector overflow
 to the next persisted row (additive; totals are `SUM(dropped_before)`).
 
 ## Reading

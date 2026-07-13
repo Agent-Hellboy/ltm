@@ -74,8 +74,8 @@ checked in, rebuilt in CI, and should not be hand-edited. Headers under
   `readv`/`writev`/`sendmsg`/`recvmsg` report `0`.
 - **fd→path** — map covers fds ≤ 1024; heavy PID reuse can misattribute; higher
   fds are recorded without a path.
-- **Drops** — under overload, kernel perf-buffer loss and collector channel
-  overflow increment `dropped_before` on the next persisted row
+- **Drops** — under overload, failed kernel ring-buffer reservations and
+  collector channel overflow increment `dropped_before` on a later persisted row
   (`SUM(dropped_before)` for totals).
 - **Metadata only** — no file contents or packet payloads (see
   [security.md](security.md)).

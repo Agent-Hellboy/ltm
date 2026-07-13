@@ -53,7 +53,7 @@ Required loader sequence:
 4. Create the eBPF collection from that object.
 5. Populate the `self_pid` map when present.
 6. Resolve and attach the expected tracepoint programs.
-7. Open a perf reader on the `events` map.
+7. Open a ring-buffer reader on the `events` map.
 8. Decode kernel event records and convert them into `storage.Event`.
 
 If this sequence changes materially, update this document.
@@ -88,12 +88,13 @@ The normative descriptions start in `internal/abi/abi.yaml`, which generates
 
 | Name | Required | Purpose |
 |---|---|---|
-| `events` | yes | `BPF_MAP_TYPE_PERF_EVENT_ARRAY` used to stream kernel event records to userspace |
+| `events` | yes | `BPF_MAP_TYPE_RINGBUF` used to stream kernel event records to userspace |
+| `ringbuf_drops` | yes | per-CPU counter for failed ring-buffer reservations |
 | `self_pid` | optional | one-entry map used to suppress events from the daemon process itself |
 
-Other maps such as `pending_open`, `fd_path`, `scratch`, and `path_scratch`
-are current implementation details of `collector.bpf.c`. They may change as
-long as the loader-visible contract remains intact.
+Other maps such as `pending_open`, `fd_path`, and `path_scratch` are current
+implementation details of `collector.bpf.c`. They may change as long as the
+loader-visible contract remains intact.
 
 ### Program names
 
@@ -125,7 +126,7 @@ Rule:
 
 ## Kernel event record ABI
 
-Each emitted perf sample must match the binary layout defined in
+Each emitted ring-buffer sample must match the binary layout defined in
 `internal/abi/kernel_event.gen.h` and expected by
 `internal/ebpf/decode_linux.go`.
 
@@ -167,17 +168,22 @@ userspace normalization must change with it.
 
 ## Transport contract
 
-The current transport from kernel to userspace is a perf event array plus a
-perf reader.
+The current transport from kernel to userspace is a BPF ring buffer plus a
+ring-buffer reader:
+
+```text
+BPF_MAP_TYPE_RINGBUF -> bpf_ringbuf_reserve -> bpf_ringbuf_submit -> ringbuf.NewReader
+```
 
 Rules:
 
-- the `events` map must remain readable by `perf.NewReader`
-- lost perf samples are surfaced through `record.LostSamples` and accumulated
-  into `dropped_before` on the next persisted row
+- the `events` map must remain readable by `ringbuf.NewReader`
+- failed ring-buffer reservations must increment `ringbuf_drops`
+- userspace samples `ringbuf_drops` and accumulates deltas into
+  `dropped_before`
 
-Changing transport to a ring buffer or another mechanism is a contract change
-and must be documented here.
+Changing transport to perf event array or another mechanism is a contract
+change and must be documented here.
 
 ## Platform contract
 
