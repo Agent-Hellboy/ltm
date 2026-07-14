@@ -91,6 +91,13 @@ make integration             # real eBPF recording; Linux + root
 Layout: `cmd/ltm` entrypoint; everything else under `internal/`
 (`abi`, `cli`, `daemon`, `collector`, `ebpf`, `storage`, `agent`, `diff`, `query`).
 
+The ABI/schema generator keeps event definitions, storage DDL, tracepoint
+metadata, and kernel-facing structs tied to one source of truth:
+`internal/abi/abi.yaml`. It is intentionally similar in spirit to CPython's
+generated-code workflow: when adding new captured event/module surface, update
+the manifest and regenerate checked-in outputs instead of hand-editing derived
+Go or C files.
+
 Docs: [`docs/`](docs/) (ABI, CLI, generated files, querying, recording,
 architecture, security).
 Contributor rules: [`AGENTS.md`](AGENTS.md).
