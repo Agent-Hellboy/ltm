@@ -4,6 +4,11 @@ Machine-history debugger for Linux. Records process, file, network, memory, and
 block I/O via eBPF, stores metadata in SQLite, and answers timeline / diff /
 plain-English / SQL questions about what happened on the box.
 
+**Tracepoint-only capture today** — recording currently uses tracepoint
+programs. It does not yet use kprobes, uprobes, XDP, or TC hooks, so it favors
+stable syscall/block/process metadata over deeper kernel internals, user-space
+function tracing, or packet-path inspection.
+
 ## Quick start
 
 ```bash
