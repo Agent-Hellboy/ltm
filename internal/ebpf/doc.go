@@ -28,7 +28,8 @@
 //     that decode_linux.go turns into storage.Event.
 //
 // So: control plane wires the pipes; data plane produces into the ring buffer;
-// control plane drains that buffer into the rest of ltm.
+// control plane drains that buffer into the rest of ltm. See docs/architecture.md
+// for the full ASCII map (kernel/userspace, planes, ring buffer, daemon path).
 //
 // # How loading works
 //

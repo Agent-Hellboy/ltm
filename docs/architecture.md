@@ -9,10 +9,56 @@ Related: [CLI](cli.md) · [querying](querying.md) · [recording](recording.md) �
 
 ## Pipeline
 
+Recording has two planes that meet at the BPF ring buffer, then a purely
+userspace path into SQLite:
+
+```text
+                         KERNEL SPACE
+ +------------------------------------------------------------------+
+ |  Linux tracepoints (sched / syscalls / block / ...)              |
+ |       |                                                          |
+ |       v                                                          |
+ |  DATA PLANE  (collector.bpf.c → BPF bytecode)                    |
+ |    should_skip / ignore /proc/sys/dev                            |
+ |    reserve_event → fill ltm_kernel_event → submit                |
+ |       |                                                          |
+ |       v                                                          |
+ |  events  BPF_MAP_TYPE_RINGBUF   (kernel-managed RAM)             |
+ |  (+ scratch, fd_path, pending_open, ringbuf_drops, self_pid)     |
+ +-------------------------------^----------------------------------+
+                                 |
+              setup: bpf() load / map create / attach
+              steady: ringbuf.Reader.Read (map FD)
+                                 |
+                         USER SPACE
+ +-------------------------------v----------------------------------+
+ |  CONTROL PLANE  (internal/ebpf via cilium/ebpf)                  |
+ |    embed collector_bpfel.o (ELF)                                 |
+ |    NewCollection → attachTracepoints → ringbuf.NewReader         |
+ |    decode RawSample → storage.Event                              |
+ |       |                                                          |
+ |       v  EventSource out channel                                 |
+ |  FILTER   internal/collector                                     |
+ |    ignore-path rules, bounded buffer, drop counter               |
+ |       |                                                          |
+ |       v                                                          |
+ |  QUEUE    ingest chan (daemon entrance queue)                    |
+ |       |                                                          |
+ |       v                                                          |
+ |  BATCH    daemon eventBatcher (size- or time-chunk)              |
+ |    join producer → close(ingest) → final flush on shutdown       |
+ |       |                                                          |
+ |       v                                                          |
+ |  STORE    internal/storage SQLite (single WAL writer)            |
+ +------------------------------------------------------------------+
+
+ READ PATH (no eBPF): timeline / watch / query / agent
+   → OpenReadOnly → Filter / EventsAfterID / RawSQL
 ```
-BPF data plane (collector.bpf.c) ──▶ ebpf control plane ──▶ collector ──▶ ingest ──▶ flushLoop ──▶ SQLite
-  ringbuf submit                     load/attach/read         filter+drop    queue         chunk TX
-```
+
+At start the control plane loads the embedded ELF and attaches programs. After
+that, the data plane alone runs on each hook; the control plane only drains the
+ring buffer and hands `storage.Event`s to the rest of the pipeline.
 
 | Stage | Package | Role |
 |---|---|---|
