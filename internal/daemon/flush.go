@@ -7,6 +7,8 @@ import (
 	"ltm/internal/storage"
 )
 
+const flushWriteTimeout = 5 * time.Second
+
 // flushLoop is the pipeline's chunk/flush stage. It wraps eventBatcher so tests
 // can keep calling svc.flushLoop. droppedFn reports the collector's cumulative
 // count of events dropped when the ingest channel was full; the delta since the
@@ -14,6 +16,8 @@ import (
 //
 // Lifecycle: keeps reading until ingest is closed. Cancellation alone does not
 // finish the stage — the service must join the producer and close(ingest).
+// InsertEvents never uses the run ctx, so cancel cannot abort a flush (TOCTOU)
+// and cause an early return that leaves ingest unread.
 func (s *Service) flushLoop(ctx context.Context, ingest <-chan storage.Event, droppedFn func() int64) error {
 	b := &eventBatcher{
 		store:       s.store,
@@ -59,13 +63,17 @@ func (b *eventBatcher) flush(ctx context.Context) error {
 	return nil
 }
 
-// writeCtx returns ctx while it is live; after cancel, use a short timeout so
-// mid-shutdown size flushes still persist instead of failing with Canceled.
-func (b *eventBatcher) writeCtx(ctx context.Context) (context.Context, context.CancelFunc) {
-	if ctx.Err() == nil {
-		return ctx, func() {}
-	}
-	return context.WithTimeout(context.Background(), 5*time.Second)
+// writeCtx always returns Background+timeout. The run ctx must not cancel DB
+// writes: a TOCTOU race (check live, then cancel, then InsertEvents) would make
+// run() return early before ingest is closed and lose queued events.
+func (b *eventBatcher) writeCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), flushWriteTimeout)
+}
+
+func (b *eventBatcher) flushWrite() error {
+	ctx, cancel := b.writeCtx()
+	defer cancel()
+	return b.flush(ctx)
 }
 
 // drainReady non-blocking-pulls from ingest until empty or maxBatch. Returns
@@ -85,16 +93,14 @@ func (b *eventBatcher) drainReady(ingest <-chan storage.Event) bool {
 	return true
 }
 
-// finish persists any leftover batch with a fresh context so a cancelled run
-// ctx cannot abort the final write.
 func (b *eventBatcher) finish() error {
-	fctx, fcancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer fcancel()
-	return b.flush(fctx)
+	return b.flushWrite()
 }
 
 // run is the for-select consumer: ingest (chunk on size) or ticker (time flush).
 // It does not exit on ctx.Done alone — that would race an active producer.
+// ctx is only used to skip pointless ticker work after cancel while waiting for
+// ingest close; every InsertEvents call uses writeCtx().
 func (b *eventBatcher) run(ctx context.Context, ingest <-chan storage.Event) error {
 	ticker := time.NewTicker(b.flushPeriod)
 	defer ticker.Stop()
@@ -110,19 +116,17 @@ func (b *eventBatcher) run(ctx context.Context, ingest <-chan storage.Event) err
 				if !b.drainReady(ingest) {
 					return b.finish()
 				}
-				wctx, wcancel := b.writeCtx(ctx)
-				err := b.flush(wctx)
-				wcancel()
-				if err != nil {
+				if err := b.flushWrite(); err != nil {
 					return err
 				}
 			}
 		case <-ticker.C:
 			if ctx.Err() != nil {
-				// Wait for ingest close after the producer joins.
+				// Wait for ingest close after the producer joins; size path and
+				// finish still persist with writeCtx.
 				continue
 			}
-			if err := b.flush(ctx); err != nil {
+			if err := b.flushWrite(); err != nil {
 				return err
 			}
 		}
