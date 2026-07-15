@@ -36,40 +36,48 @@ func (c *Collector) DroppedEvents() int64 {
 
 func (c *Collector) Run(ctx context.Context, src ebpf.EventSource, out chan<- storage.Event) error {
 	in := make(chan storage.Event, c.cfg.BufferSize)
-	errCh := make(chan error, 1)
+	// done carries the source's terminal result after close(in). Closed in only
+	// means "no more events"; the result is read from done so a source error
+	// cannot be lost to a select race with the closed in case.
+	done := make(chan error, 1)
 	go func() {
 		err := src.Run(ctx, in)
 		close(in)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			errCh <- err
-		}
-		close(errCh)
+		done <- err
 	}()
+
+	forward := func(ev storage.Event) {
+		if c.shouldIgnore(ev.Path) || c.shouldIgnore(ev.OldPath) {
+			return
+		}
+		select {
+		case out <- ev:
+		default:
+			atomic.AddInt64(&c.dropped, 1)
+		}
+	}
+
+	finish := func() error {
+		err := <-done
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return err
+		}
+		return nil
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
-		case err, ok := <-errCh:
-			if !ok {
-				errCh = nil
-				continue
+			// Drain already-produced events, then join the source worker.
+			for ev := range in {
+				forward(ev)
 			}
-			if err != nil {
-				return err
-			}
+			return finish()
 		case ev, ok := <-in:
 			if !ok {
-				return nil
+				return finish()
 			}
-			if c.shouldIgnore(ev.Path) || c.shouldIgnore(ev.OldPath) {
-				continue
-			}
-			select {
-			case out <- ev:
-			default:
-				atomic.AddInt64(&c.dropped, 1)
-			}
+			forward(ev)
 		}
 	}
 }

@@ -41,10 +41,23 @@ func (s *Service) Run(ctx context.Context) error {
 	return s.runWithSource(ctx, ebpf.NewSource())
 }
 
+// runWithSource builds a two-stage pipeline:
+//
+//	ebpf/src ──▶ collector (filter + source buffer) ──▶ ingest ──▶ flushLoop ──▶ store
+//
+// ingest is the pipeline entrance queue (buffered channel): it decouples capture
+// from SQLite so a slow flush does not stall the collector.
+//
+// Shutdown order (producer quiesce, then close, then consumer drain):
+//  1. cancel shared ctx
+//  2. wait for collector (sole sender into ingest)
+//  3. close(ingest) — no more sends are possible
+//  4. wait for flushLoop to read until close and persist
 func (s *Service) runWithSource(ctx context.Context, src ebpf.EventSource) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// Entrance queue (Queuing): capacity tuned for bursty eBPF ingest.
 	ingest := make(chan storage.Event, defaultIngestBufferSize)
 	col := collector.New(collector.Config{
 		IgnorePaths: s.cfg.IgnorePaths,
@@ -53,31 +66,36 @@ func (s *Service) runWithSource(ctx context.Context, src ebpf.EventSource) error
 
 	colErr := make(chan error, 1)
 	go func() {
+		// Stage: generate/filter — ignore paths, bound the source buffer, count drops.
 		colErr <- col.Run(ctx, src, ingest)
 	}()
 	flushErr := make(chan error, 1)
 	go func() {
+		// Stage: chunk/flush — size-or-time batches into InsertEvents.
+		// Exits only after ingest is closed (see flushLoop).
 		flushErr <- s.flushLoop(ctx, ingest, col.DroppedEvents)
 	}()
 
 	var runErr error
+	colDone := false
 	flushDone := false
 	select {
 	case <-ctx.Done():
 	case runErr = <-colErr:
+		colDone = true
 	case runErr = <-flushErr:
 		flushDone = true
 	}
-	// Stop the collector and flush loop, then wait for the flush loop to drain
-	// and persist its final batch before returning. The caller closes the store
-	// right after Run returns, so returning early would drop buffered events and
-	// race the writer against Store.Close.
+
 	cancel()
-	if flushDone {
+	if !colDone {
 		if cerr := <-colErr; cerr != nil && runErr == nil {
 			runErr = cerr
 		}
-	} else {
+	}
+	// Producer has stopped; closing ingest is safe and unblocks the flusher.
+	close(ingest)
+	if !flushDone {
 		if ferr := <-flushErr; ferr != nil && runErr == nil {
 			runErr = ferr
 		}
