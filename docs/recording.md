@@ -92,3 +92,59 @@ sudo ltm stop              # join producer, close ingest, final flush, then exit
 On shutdown the service joins the collector before closing `ingest`, then waits for
 the flush loop to finish before the store is closed; otherwise the last batch can be
 lost. That path is covered by daemon tests.
+
+## systemd (optional)
+
+`ltm start` is the default, portable way to run the recorder. Machines that
+want it always on across reboots can instead run `daemon --foreground`
+directly under systemd, using the unit in
+[`contrib/systemd/ltm.service`](../contrib/systemd/ltm.service). This is
+opt-in and Linux-only (recording already requires Linux); it doesn't replace
+`ltm start`/`ltm stop`.
+
+```bash
+go build -o bin/ltm ./cmd/ltm
+sudo install -m 0755 bin/ltm /usr/bin/ltm
+sudo install -m 0644 contrib/systemd/ltm.service /etc/systemd/system/ltm.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now ltm
+```
+
+```bash
+systemctl status ltm                     # unit + process state, journal tail
+sudo journalctl -u ltm -f                # follow recorder logs
+ltm --db /var/lib/ltm/ltm.db status      # event counts, dropped, last event
+ltm --db /var/lib/ltm/ltm.db timeline --since 10m
+
+sudo systemctl stop ltm                  # graceful: same shutdown path as `ltm stop`
+sudo systemctl disable ltm
+```
+
+Notes:
+
+- The unit runs `daemon --foreground` as `Type=simple`, which is what it's
+  designed for: no forking, no re-exec, systemd tracks the process directly
+  and restarts it on failure.
+- Needs root, or `CAP_BPF` + `CAP_PERFMON` **and** `CAP_DAC_READ_SEARCH` — the
+  collector also reads tracepoint ids from
+  `/sys/kernel/tracing/events/**/id`, which are mode `440 root:root`, so the
+  two BPF caps alone aren't enough for a non-root user (every tracepoint open
+  fails with "permission denied" and the daemon exits). The unit defaults to
+  `User=root` (matching `sudo ltm start`) with a commented-out unprivileged
+  variant carrying all three capabilities, verified on a 6.8 kernel. See
+  [security.md](security.md).
+- The `daemon` subcommand (unlike `start`) doesn't write a pidfile, so
+  `ltm status`'s `alive` field won't reflect a systemd-managed process — use
+  `systemctl status ltm` for liveness instead. Event counts/timeline/etc. via
+  `ltm` still work against the same `--db` path either way.
+- `StateDirectory=ltm` / `RuntimeDirectory=ltm` put the db under
+  `/var/lib/ltm/` and the (unused) pidfile path under `/run/ltm/`; systemd
+  creates/owns both.
+- **Don't point `ltm start` (or a second instance) at the same `--db` as an
+  active systemd-managed recorder.** Two writers on one SQLite db contend
+  until a write blows past an internal deadline, both processes exit with
+  `context deadline exceeded`, and `Restart=on-failure` crash-loops the
+  service until only one recorder remains. No data corruption results
+  (`PRAGMA integrity_check` stays `ok`), but it's a real outage of recording
+  in the meantime — use a distinct `--db` for anything ad hoc, or stop the
+  unit first.
