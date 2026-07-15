@@ -1,5 +1,9 @@
 //go:build !linux
 
+// Recording (eBPF) is Linux-only, but cmd/ltm still imports this package on
+// every OS via daemon → ebpf. This stub keeps go build working off Linux
+// (query, timeline, benchmark, local tests) by providing NewSource/Run that
+// return ErrNotImplemented instead of compiling the real control plane.
 package ebpf
 
 import (

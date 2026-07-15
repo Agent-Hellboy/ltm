@@ -1,5 +1,7 @@
 //go:build linux
 
+// Linux control-plane implementation of EventSource: memlock, load embedded
+// BPF ELF, create maps, attach tracepoints, read the events ring buffer.
 package ebpf
 
 import (

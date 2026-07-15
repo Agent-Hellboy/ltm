@@ -10,15 +10,14 @@ Related: [CLI](cli.md) · [querying](querying.md) · [recording](recording.md) �
 ## Pipeline
 
 ```
-eBPF tracepoints ──▶ ebpf.EventSource ──▶ collector ──▶ ingest queue ──▶ daemon.flushLoop ──▶ storage (SQLite)
-                     kernel → Event       ignore +       entrance        size/time chunks      single WAL writer
-                                          buffer + drop  (decouple)      (confined batcher)
+BPF data plane (collector.bpf.c) ──▶ ebpf control plane ──▶ collector ──▶ ingest ──▶ flushLoop ──▶ SQLite
+  ringbuf submit                     load/attach/read         filter+drop    queue         chunk TX
 ```
 
 | Stage | Package | Role |
 |---|---|---|
 | ABI | `internal/abi` | Handwritten `abi.yaml` plus generated schema/version constants, tracepoint table, and kernel-event header used by storage, CLI help, agent prompts, and BPF compilation. |
-| Capture | `internal/ebpf` | Attach syscall/sched/block tracepoints; map each kernel record to `storage.Event`. Linux only; non-Linux stub errors. BPF object and Go bindings are generated/embedded; rebuild with `make ebpf`. |
+| Capture | `internal/ebpf` | Userspace **control plane**: load embedded BPF ELF, create maps, attach syscall/sched/block tracepoints, read the events ring buffer into `storage.Event`. In-kernel **data plane** is `collector.bpf.c`. Linux only; non-Linux stub errors. Rebuild with `make ebpf`. |
 | Filter | `internal/collector` | Drop ignored path prefixes (userspace list; BPF only filters `/proc`/`/sys`/`/dev`). Bounded channel; overflow increments a dropped counter. |
 | Queue + Batch | `internal/daemon` | Buffered `ingest` entrance queue decouples capture from SQLite. A confined `eventBatcher` (for-select) chunks by size or flush period into one transaction. On shutdown: cancel, **join the collector (producer)**, `close(ingest)`, then let flushLoop read to close and persist with a **fresh** context so the cancelled run ctx cannot abort the final write. |
 | Store | `internal/storage` | SQLite (`modernc.org/sqlite`, no CGo). Daemon holds the only writer (`Open`, WAL, `MaxOpenConns(1)`). Every read path uses `OpenReadOnly` + `PRAGMA query_only=ON`. |
@@ -46,7 +45,7 @@ internal/cli     flags, subcommands, daemon spawn (Setsid)
 internal/abi     abi.yaml + generated schema/tracepoint/kernel ABI
 internal/daemon  service lifecycle + ingest queue + confined flushLoop
 internal/collector  ignore rules + fan-in buffer
-internal/ebpf    EventSource contract, BPF C, generated .o/.go bindings
+internal/ebpf    control plane (load/attach/read) + BPF C data plane + stub
 internal/storage Event, Filter, SQLite
 internal/diff    time-window summary
 internal/query   NL templates
