@@ -1,0 +1,36 @@
+[Unit]
+Description=ltm always-on activity recorder (eBPF)
+Documentation=https://github.com/Agent-Hellboy/ltm/blob/main/docs/recording.md
+# Recording is Linux/x86_64 only; see docs/recording.md.
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ltm daemon --foreground --db /var/lib/ltm/ltm.db --pidfile /run/ltm/ltm.pid
+Restart=on-failure
+RestartSec=5s
+
+# Owns /var/lib/ltm (db) and /run/ltm (pidfile); created/removed by systemd
+# around the service's lifetime.
+StateDirectory=ltm
+RuntimeDirectory=ltm
+
+# Recording needs to attach BPF tracepoints and read kernel perf event info:
+# root, or CAP_BPF + CAP_PERFMON + CAP_DAC_READ_SEARCH (see docs/security.md).
+# Root is the simplest default and what `sudo ltm start` already assumes;
+# switch to the capability form below to run unprivileged.
+User=root
+
+# --- Unprivileged alternative (comment out User=root above, uncomment these) ---
+# CAP_DAC_READ_SEARCH is required too: the collector reads tracepoint ids from
+# /sys/kernel/tracing/events/**/id, which are mode 440 root:root, and neither
+# CAP_BPF nor CAP_PERFMON grants DAC bypass. Without it every tracepoint open
+# fails with "permission denied" and the daemon exits ("no tracepoints could
+# be attached"). Verified on a 6.8 kernel.
+# User=ltm
+# CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_DAC_READ_SEARCH
+# AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_DAC_READ_SEARCH
+# NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

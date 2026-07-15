@@ -7,8 +7,14 @@ Related: [recording](recording.md) · [querying](querying.md) ·
 
 | Action | Needs |
 |---|---|
-| `ltm start` (record) | root, or `CAP_BPF` + `CAP_PERFMON` |
+| `ltm start` (record) | root, or `CAP_BPF` + `CAP_PERFMON` + `CAP_DAC_READ_SEARCH` |
 | timeline / watch / diff / query / sql / status | none — opens the DB read-only |
+
+`CAP_DAC_READ_SEARCH` is needed alongside the two BPF capabilities because the
+collector reads tracepoint ids from `/sys/kernel/tracing/events/**/id`, which
+are mode `440 root:root`; `CAP_BPF`/`CAP_PERFMON` don't grant DAC bypass on
+their own. Without it every tracepoint fails to open and the daemon exits
+with "no tracepoints could be attached" (verified on a 6.8 kernel).
 
 `start` re-execs as `daemon --foreground` and detaches (`Setsid`) so the
 recorder survives the launching shell.

@@ -38,6 +38,10 @@ sudo ltm stop
 the process survives the launching shell. Needs root / BPF caps (see
 [security](security.md)).
 
+For always-on recording across reboots, an optional systemd unit
+(`daemon --foreground` as `Type=simple`) is available instead — see
+[recording.md#systemd-optional](recording.md#systemd-optional).
+
 ### `timeline`
 
 Newest-first event list with AND filters. Repeatable flags OR within that field.
