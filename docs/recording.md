@@ -86,8 +86,9 @@ checked in, rebuilt in CI, and should not be hand-edited. Headers under
 sudo ltm start
 ltm status                 # alive, counts, dropped, last event
 # … workload …
-sudo ltm stop              # drains buffer, final flush, then exits
+sudo ltm stop              # join producer, close ingest, final flush, then exits
 ```
 
-On shutdown the flush loop must finish before the store is closed; otherwise the
-last batch can be lost. That path is covered by daemon tests.
+On shutdown the service joins the collector before closing `ingest`, then waits for
+the flush loop to finish before the store is closed; otherwise the last batch can be
+lost. That path is covered by daemon tests.

@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -82,6 +83,79 @@ func TestShouldIgnore(t *testing.T) {
 	for path, want := range cases {
 		if got := c.shouldIgnore(path); got != want {
 			t.Errorf("shouldIgnore(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+// errorSource emits events then returns a real capture error (not cancel).
+type errorSource struct {
+	events []storage.Event
+	err    error
+}
+
+func (s errorSource) Run(ctx context.Context, out chan<- storage.Event) error {
+	for _, ev := range s.events {
+		select {
+		case out <- ev:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return s.err
+}
+
+func TestCollectorReturnsSourceError(t *testing.T) {
+	// Closed-in vs source-result used to race in select; exercise repeatedly.
+	srcErr := errors.New("capture boom")
+	for attempt := 0; attempt < 50; attempt++ {
+		c := New(Config{BufferSize: 8})
+		src := errorSource{
+			events: []storage.Event{{Category: "process", Action: "exec", PID: 1}},
+			err:    srcErr,
+		}
+		out := make(chan storage.Event, 8)
+		err := c.Run(context.Background(), src, out)
+		if !errors.Is(err, srcErr) {
+			t.Fatalf("attempt %d: Run error = %v, want %v", attempt, err, srcErr)
+		}
+		select {
+		case <-out:
+		default:
+			t.Fatalf("attempt %d: expected the pre-error event to be forwarded", attempt)
+		}
+	}
+}
+
+func TestCollectorDrainsSourceEventsOnCancel(t *testing.T) {
+	c := New(Config{BufferSize: 64})
+	events := make([]storage.Event, 32)
+	for i := range events {
+		events[i] = storage.Event{Category: "file", Action: "write", PID: i + 1, Path: "/tmp/x"}
+	}
+	src := staticSource{events: events}
+	out := make(chan storage.Event, 64)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Run(ctx, src, out) }()
+
+	// Let the source fill the collector input buffer, then cancel.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var n int
+	for {
+		select {
+		case <-out:
+			n++
+		default:
+			if n == 0 {
+				t.Fatal("expected drained source events to be forwarded on cancel")
+			}
+			return
 		}
 	}
 }

@@ -10,9 +10,9 @@ Related: [CLI](cli.md) · [querying](querying.md) · [recording](recording.md) �
 ## Pipeline
 
 ```
-eBPF tracepoints ──▶ ebpf.EventSource ──▶ collector ──▶ daemon.flushLoop ──▶ storage (SQLite)
-                     kernel → Event       ignore +       batch TX              single WAL writer
-                                          buffer + drop
+eBPF tracepoints ──▶ ebpf.EventSource ──▶ collector ──▶ ingest queue ──▶ daemon.flushLoop ──▶ storage (SQLite)
+                     kernel → Event       ignore +       entrance        size/time chunks      single WAL writer
+                                          buffer + drop  (decouple)      (confined batcher)
 ```
 
 | Stage | Package | Role |
@@ -20,7 +20,7 @@ eBPF tracepoints ──▶ ebpf.EventSource ──▶ collector ──▶ daemon
 | ABI | `internal/abi` | Handwritten `abi.yaml` plus generated schema/version constants, tracepoint table, and kernel-event header used by storage, CLI help, agent prompts, and BPF compilation. |
 | Capture | `internal/ebpf` | Attach syscall/sched/block tracepoints; map each kernel record to `storage.Event`. Linux only; non-Linux stub errors. BPF object and Go bindings are generated/embedded; rebuild with `make ebpf`. |
 | Filter | `internal/collector` | Drop ignored path prefixes (userspace list; BPF only filters `/proc`/`/sys`/`/dev`). Bounded channel; overflow increments a dropped counter. |
-| Batch | `internal/daemon` | `flushLoop` writes batches in one transaction. On shutdown: stop sources, drain the buffer, flush with a **fresh** context (the cancelled run ctx must not abort the final write), then return so the caller can close the store. |
+| Queue + Batch | `internal/daemon` | Buffered `ingest` entrance queue decouples capture from SQLite. A confined `eventBatcher` (for-select) chunks by size or flush period into one transaction. On shutdown: cancel, **join the collector (producer)**, `close(ingest)`, then let flushLoop read to close and persist with a **fresh** context so the cancelled run ctx cannot abort the final write. |
 | Store | `internal/storage` | SQLite (`modernc.org/sqlite`, no CGo). Daemon holds the only writer (`Open`, WAL, `MaxOpenConns(1)`). Every read path uses `OpenReadOnly` + `PRAGMA query_only=ON`. |
 
 `Event.DroppedBefore` attributes kernel ring-buffer loss and collector overflow
@@ -44,7 +44,7 @@ simulated collector.
 cmd/ltm          thin main → cli.Execute
 internal/cli     flags, subcommands, daemon spawn (Setsid)
 internal/abi     abi.yaml + generated schema/tracepoint/kernel ABI
-internal/daemon  service lifecycle + flushLoop
+internal/daemon  service lifecycle + ingest queue + confined flushLoop
 internal/collector  ignore rules + fan-in buffer
 internal/ebpf    EventSource contract, BPF C, generated .o/.go bindings
 internal/storage Event, Filter, SQLite

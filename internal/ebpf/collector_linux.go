@@ -74,8 +74,14 @@ func (c collector) Run(ctx context.Context, out chan<- storage.Event) error {
 	var lastKernelDropped uint64
 	var decodeErrors uint64
 
+	// Unblock reader.Read on cancel or when Run returns for any reason.
+	readerDone := make(chan struct{})
+	defer close(readerDone)
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-readerDone:
+		}
 		_ = reader.Close()
 	}()
 
