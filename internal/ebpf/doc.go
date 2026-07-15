@@ -10,6 +10,26 @@
 // attach programs to hooks, and read committed ring-buffer records into
 // storage.Event for the daemon pipeline (collector → ingest → flush → SQLite).
 //
+// # Kernel ↔ userspace interaction
+//
+// The control plane is how userspace and kernel space meet for recording.
+// There is no custom kernel module and no copying event structs through ordinary
+// read()/write() syscalls from BPF; interaction goes through the BPF subsystem:
+//
+//   Setup (userspace → kernel), once at start:
+//     Go/cilium issues bpf() syscalls to create maps, load bytecode, and attach
+//     programs to kernel tracepoints. After that, the programs live in the kernel.
+//
+//   Steady state (kernel → userspace), per event:
+//     A tracepoint fires → BPF data plane fills a slot in the events ring buffer
+//     (bpf_ringbuf_reserve / submit; those are in-kernel helpers, not Go calls).
+//     The ring buffer is kernel-managed memory; userspace observes it via the map
+//     FD. ringbuf.Reader.Read wakes when records are committed and returns bytes
+//     that decode_linux.go turns into storage.Event.
+//
+// So: control plane wires the pipes; data plane produces into the ring buffer;
+// control plane drains that buffer into the rest of ltm.
+//
 // # How loading works
 //
 // clang/bpf2go produce collector_bpfel.o (ELF) and collector_bpfel.go. The .o is
@@ -21,8 +41,8 @@
 //  4. Attaches programs to tracepoints (attach_linux.go / link.Tracepoint).
 //  5. Opens a ringbuf.Reader on events and maps RawSample → storage.Event.
 //
-// bpf_* helpers in the C program are kernel helpers (not Go and not syscalls
-// from BPF). cilium/ebpf only drives the userspace bpf() syscalls for load/attach/read.
+// bpf_* helpers in the C program are kernel helpers. cilium/ebpf drives the
+// userspace bpf() syscalls for load/attach/read.
 //
 // # Layout
 //

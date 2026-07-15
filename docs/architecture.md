@@ -17,7 +17,7 @@ BPF data plane (collector.bpf.c) ──▶ ebpf control plane ──▶ collecto
 | Stage | Package | Role |
 |---|---|---|
 | ABI | `internal/abi` | Handwritten `abi.yaml` plus generated schema/version constants, tracepoint table, and kernel-event header used by storage, CLI help, agent prompts, and BPF compilation. |
-| Capture | `internal/ebpf` | Userspace **control plane**: load embedded BPF ELF, create maps, attach syscall/sched/block tracepoints, read the events ring buffer into `storage.Event`. In-kernel **data plane** is `collector.bpf.c`. Linux only; non-Linux stub errors. Rebuild with `make ebpf`. |
+| Capture | `internal/ebpf` | Userspace **control plane** for kernel↔userspace: `bpf()` load/attach of the embedded ELF, then drain the kernel `events` ring buffer into `storage.Event`. In-kernel **data plane** (`collector.bpf.c`) writes that buffer on tracepoints. Linux only; non-Linux stub errors. Rebuild with `make ebpf`. |
 | Filter | `internal/collector` | Drop ignored path prefixes (userspace list; BPF only filters `/proc`/`/sys`/`/dev`). Bounded channel; overflow increments a dropped counter. |
 | Queue + Batch | `internal/daemon` | Buffered `ingest` entrance queue decouples capture from SQLite. A confined `eventBatcher` (for-select) chunks by size or flush period into one transaction. On shutdown: cancel, **join the collector (producer)**, `close(ingest)`, then let flushLoop read to close and persist with a **fresh** context so the cancelled run ctx cannot abort the final write. |
 | Store | `internal/storage` | SQLite (`modernc.org/sqlite`, no CGo). Daemon holds the only writer (`Open`, WAL, `MaxOpenConns(1)`). Every read path uses `OpenReadOnly` + `PRAGMA query_only=ON`. |
