@@ -102,8 +102,15 @@ func runStatus(cfg Config, args []string) error {
 	}
 	selfLoop := containsSelfSource(sources)
 
+	// Latest resource sample (Phase 1 /proc+PSI timeline), if the sampler has
+	// written any — a machine-state snapshot alongside the activity counts.
+	sys, hasSys, _ := store.LatestSystemSample(context.Background())
+
 	if *jsonOut {
 		out := map[string]any{"pid": pid, "alive": alive, "status": status}
+		if hasSys {
+			out["system"] = sys
+		}
 		if status.DroppedEvents > 0 {
 			out["diagnostics"] = map[string]any{
 				"suspected_feedback_loop": selfLoop,
@@ -114,8 +121,30 @@ func runStatus(cfg Config, args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "daemon: alive=%t pid=%d\n", alive, pid)
 	fmt.Fprintf(os.Stdout, "events=%d dropped=%d last_event=%s\n", status.EventCount, status.DroppedEvents, status.LastEventTime.Format(time.RFC3339))
+	if hasSys {
+		fmt.Fprintln(os.Stdout, formatResourceLine(sys))
+	}
 	printDropDiagnostic(os.Stdout, status.DroppedEvents, sources, selfLoop)
 	return nil
+}
+
+// formatResourceLine renders the latest system sample as a compact one-liner
+// for `ltm status`.
+func formatResourceLine(s storage.SystemSample) string {
+	return fmt.Sprintf("resources: cpu=%.0f%% load=%.2f mem=%.0f%% swap=%.0f%% psi-some(cpu/mem/io)=%.1f/%.1f/%.1f",
+		s.CPUPct, s.Load1,
+		pctUsed(s.MemAvailableKB, s.MemTotalKB),
+		pctUsed(s.SwapFreeKB, s.SwapTotalKB),
+		s.PSICPUSomeAvg10, s.PSIMemSomeAvg10, s.PSIIOSomeAvg10)
+}
+
+// pctUsed converts a free/total pair into a used percentage (0 when total is 0,
+// e.g. no swap configured).
+func pctUsed(free, total int64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return 100 * float64(total-free) / float64(total)
 }
 
 // containsSelfSource reports whether ltm itself is among the busiest recent
