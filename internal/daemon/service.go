@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"path/filepath"
 	"time"
 
 	"ltm/internal/collector"
@@ -11,6 +12,14 @@ import (
 
 type Config struct {
 	IgnorePaths []string
+	// DBPath and PIDFile are the recorder's own runtime files. The daemon adds
+	// them (and the SQLite WAL/SHM/journal sidecars) to the collector's ignore
+	// rules automatically, so activity ltm generates against its own store is
+	// never captured — the user never has to pass --ignore-path for it. This is
+	// the userspace half of the feedback-loop guard; the kernel half filters by
+	// the "ltm" program name (see should_skip in collector.bpf.c).
+	DBPath      string
+	PIDFile     string
 	BatchSize   int
 	FlushPeriod time.Duration
 }
@@ -41,6 +50,33 @@ func (s *Service) Run(ctx context.Context) error {
 	return s.runWithSource(ctx, ebpf.NewSource())
 }
 
+// withSelfIgnores appends the recorder's own runtime files to the caller's
+// ignore paths so ltm never captures its own reads/writes of the SQLite store
+// or pid file. WAL mode keeps -wal/-shm sidecars (and -journal in rollback
+// mode) with their own I/O, so all are covered. Paths are resolved to absolute
+// form because the collector filter matches against the absolute paths eBPF
+// observes, and storage.Open opens the DB by its absolute path.
+func withSelfIgnores(ignore []string, dbPath, pidFile string) []string {
+	out := append([]string{}, ignore...)
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		out = append(out, p)
+	}
+	if dbPath != "" {
+		if abs, err := filepath.Abs(dbPath); err == nil {
+			dbPath = abs
+		}
+		out = append(out, dbPath, dbPath+"-wal", dbPath+"-shm", dbPath+"-journal")
+	}
+	add(pidFile)
+	return out
+}
+
 // runWithSource builds a two-stage pipeline:
 //
 //	ebpf/src ──▶ collector (filter + source buffer) ──▶ ingest ──▶ flushLoop ──▶ store
@@ -60,7 +96,7 @@ func (s *Service) runWithSource(ctx context.Context, src ebpf.EventSource) error
 	// Entrance queue (Queuing): capacity tuned for bursty eBPF ingest.
 	ingest := make(chan storage.Event, defaultIngestBufferSize)
 	col := collector.New(collector.Config{
-		IgnorePaths: s.cfg.IgnorePaths,
+		IgnorePaths: withSelfIgnores(s.cfg.IgnorePaths, s.cfg.DBPath, s.cfg.PIDFile),
 		BufferSize:  defaultSourceBufferSize,
 	})
 

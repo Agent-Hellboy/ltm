@@ -48,6 +48,14 @@ type Status struct {
 	StartedAt     time.Time `json:"started_at"`
 }
 
+// SourceCount is a per-process share of recent event volume, used to point at
+// whatever is flooding the recorder when drops appear (e.g. a feedback loop).
+type SourceCount struct {
+	Comm  string `json:"comm"`
+	Exe   string `json:"exe,omitempty"`
+	Count int64  `json:"count"`
+}
+
 type InsertStats struct {
 	Dropped      int64
 	WriteLatency time.Duration

@@ -14,6 +14,33 @@ import (
 	"ltm/internal/storage"
 )
 
+func TestPrintDropDiagnosticFlagsSelfLoop(t *testing.T) {
+	sources := []storage.SourceCount{
+		{Comm: "ltm", Exe: "/usr/bin/ltm", Count: 9357},
+		{Comm: "worker", Count: 12},
+	}
+	var buf bytes.Buffer
+	printDropDiagnostic(&buf, 14669, sources, containsSelfSource(sources))
+	out := buf.String()
+	if !strings.Contains(out, "14669 events dropped") {
+		t.Errorf("missing drop count: %q", out)
+	}
+	if !strings.Contains(out, "ltm") || !strings.Contains(out, "9357") {
+		t.Errorf("missing busiest producer: %q", out)
+	}
+	if !strings.Contains(out, "feedback loop") {
+		t.Errorf("expected feedback-loop callout when ltm is a top source: %q", out)
+	}
+}
+
+func TestPrintDropDiagnosticQuietWhenNoDrops(t *testing.T) {
+	var buf bytes.Buffer
+	printDropDiagnostic(&buf, 0, nil, false)
+	if buf.Len() != 0 {
+		t.Errorf("expected no output when nothing dropped, got %q", buf.String())
+	}
+}
+
 func newTestStore(t *testing.T) *storage.Store {
 	t.Helper()
 	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
