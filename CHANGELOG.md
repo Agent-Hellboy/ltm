@@ -23,6 +23,15 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Discrete kernel fault events + disk-latency correlation (observability
+  Phases 2–3).** New eBPF programs emit immediate events for hard faults, with
+  detail in the event `metadata` JSON (all `optional`, kernel-config dependent):
+  - `oom/mark_victim` → `memory`/`oom_kill` (victim pid/comm/uid, `rss_bytes`).
+  - `sched/sched_process_hang` → `process`/`hang` (hung-task detector).
+  - `block/block_rq_error` → `block`/`error` (`errno`, `sector`, `rwbs`).
+  - Disk latency: `block_rq_issue` timestamps each request in a BPF map;
+    `block_rq_complete` computes service latency and emits `block`/`slow_io`
+    only above 100 ms (`latency_ns` in metadata), so volume stays bounded.
 - **Resource sampling timeline (observability Phase 1).** A userspace sampler
   reads `/proc` + PSI and records two new tables, queryable via `ltm query sql`:
   - `system_samples` (~1s): CPU %, load, runnable/blocked procs, memory/swap,

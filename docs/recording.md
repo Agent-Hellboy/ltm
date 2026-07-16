@@ -70,6 +70,27 @@ layout changed. The generated `collector_bpfel.o` and `collector_bpfel.go` are
 checked in, rebuilt in CI, and should not be hand-edited. Headers under
 `internal/ebpf/headers/` are minimal stubs, not a full vmlinux/libbpf tree.
 
+## Fault events (Phases 2–3)
+
+Beyond routine activity, the collector emits immediate events for hard faults,
+with numeric detail in the event `metadata` JSON (query with
+`json_extract(metadata, '$.key')`). All are `optional` tracepoints:
+
+| category / action | source | metadata |
+|---|---|---|
+| `memory` / `oom_kill` | `oom/mark_victim` | `rss_bytes` (victim pid/comm/uid on the row) |
+| `process` / `hang` | `sched/sched_process_hang` | — (pid/comm on the row) |
+| `block` / `error` | `block/block_rq_error` | `errno`, `sector`, `rwbs`, `dev` |
+| `block` / `slow_io` | `block_rq_issue`→`block_rq_complete` | `latency_ns`, `rwbs`, `dev` |
+
+`slow_io` uses a BPF map to time each request from issue to completion and only
+emits above 100 ms, so it does not add a row per I/O. Example:
+
+```bash
+ltm query sql "SELECT datetime(ts/1e9,'unixepoch') t, comm, json_extract(metadata,'\$.rss_bytes') rss FROM events WHERE action='oom_kill'"
+ltm query sql "SELECT json_extract(metadata,'\$.latency_ns')/1e6 ms, json_extract(metadata,'\$.rwbs') rwbs FROM events WHERE action='slow_io' ORDER BY ms DESC"
+```
+
 ## Resource sampling (Phase 1)
 
 Alongside the per-event activity log, the daemon runs a userspace sampler

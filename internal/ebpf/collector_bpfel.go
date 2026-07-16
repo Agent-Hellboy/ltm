@@ -44,6 +44,13 @@ type collectorPathState struct {
 	Path [128]int8
 }
 
+type collectorRqKey struct {
+	_      structs.HostLayout
+	Dev    uint32
+	_      [4]byte
+	Sector uint64
+}
+
 // loadCollector returns the embedded CollectionSpec for collector.
 func loadCollector() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_CollectorBytes)
@@ -86,9 +93,13 @@ type collectorSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type collectorProgramSpecs struct {
+	TraceBlockRqComplete       *ebpf.ProgramSpec `ebpf:"trace_block_rq_complete"`
+	TraceBlockRqError          *ebpf.ProgramSpec `ebpf:"trace_block_rq_error"`
 	TraceBlockRqIssue          *ebpf.ProgramSpec `ebpf:"trace_block_rq_issue"`
+	TraceOomMarkVictim         *ebpf.ProgramSpec `ebpf:"trace_oom_mark_victim"`
 	TraceSchedProcessExit      *ebpf.ProgramSpec `ebpf:"trace_sched_process_exit"`
 	TraceSchedProcessFork      *ebpf.ProgramSpec `ebpf:"trace_sched_process_fork"`
+	TraceSchedProcessHang      *ebpf.ProgramSpec `ebpf:"trace_sched_process_hang"`
 	TraceSysEnterAccept        *ebpf.ProgramSpec `ebpf:"trace_sys_enter_accept"`
 	TraceSysEnterAccept4       *ebpf.ProgramSpec `ebpf:"trace_sys_enter_accept4"`
 	TraceSysEnterAccess        *ebpf.ProgramSpec `ebpf:"trace_sys_enter_access"`
@@ -160,6 +171,7 @@ type collectorMapSpecs struct {
 	PathScratch  *ebpf.MapSpec `ebpf:"path_scratch"`
 	PendingOpen  *ebpf.MapSpec `ebpf:"pending_open"`
 	RingbufDrops *ebpf.MapSpec `ebpf:"ringbuf_drops"`
+	RqStart      *ebpf.MapSpec `ebpf:"rq_start"`
 	SelfPid      *ebpf.MapSpec `ebpf:"self_pid"`
 }
 
@@ -195,6 +207,7 @@ type collectorMaps struct {
 	PathScratch  *ebpf.Map `ebpf:"path_scratch"`
 	PendingOpen  *ebpf.Map `ebpf:"pending_open"`
 	RingbufDrops *ebpf.Map `ebpf:"ringbuf_drops"`
+	RqStart      *ebpf.Map `ebpf:"rq_start"`
 	SelfPid      *ebpf.Map `ebpf:"self_pid"`
 }
 
@@ -205,6 +218,7 @@ func (m *collectorMaps) Close() error {
 		m.PathScratch,
 		m.PendingOpen,
 		m.RingbufDrops,
+		m.RqStart,
 		m.SelfPid,
 	)
 }
@@ -220,9 +234,13 @@ type collectorVariables struct {
 //
 // It can be passed to loadCollectorObjects or ebpf.CollectionSpec.LoadAndAssign.
 type collectorPrograms struct {
+	TraceBlockRqComplete       *ebpf.Program `ebpf:"trace_block_rq_complete"`
+	TraceBlockRqError          *ebpf.Program `ebpf:"trace_block_rq_error"`
 	TraceBlockRqIssue          *ebpf.Program `ebpf:"trace_block_rq_issue"`
+	TraceOomMarkVictim         *ebpf.Program `ebpf:"trace_oom_mark_victim"`
 	TraceSchedProcessExit      *ebpf.Program `ebpf:"trace_sched_process_exit"`
 	TraceSchedProcessFork      *ebpf.Program `ebpf:"trace_sched_process_fork"`
+	TraceSchedProcessHang      *ebpf.Program `ebpf:"trace_sched_process_hang"`
 	TraceSysEnterAccept        *ebpf.Program `ebpf:"trace_sys_enter_accept"`
 	TraceSysEnterAccept4       *ebpf.Program `ebpf:"trace_sys_enter_accept4"`
 	TraceSysEnterAccess        *ebpf.Program `ebpf:"trace_sys_enter_access"`
@@ -287,9 +305,13 @@ type collectorPrograms struct {
 
 func (p *collectorPrograms) Close() error {
 	return _CollectorClose(
+		p.TraceBlockRqComplete,
+		p.TraceBlockRqError,
 		p.TraceBlockRqIssue,
+		p.TraceOomMarkVictim,
 		p.TraceSchedProcessExit,
 		p.TraceSchedProcessFork,
+		p.TraceSchedProcessHang,
 		p.TraceSysEnterAccept,
 		p.TraceSysEnterAccept4,
 		p.TraceSysEnterAccess,

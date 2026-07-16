@@ -18,6 +18,24 @@ tracepoints:
     event: block_rq_issue
     program: trace_block_rq_issue
     optional: true
+  # Phase 2/3: discrete fault events + disk-latency correlation. All optional
+  # because availability is kernel-config dependent.
+  - group: block
+    event: block_rq_complete
+    program: trace_block_rq_complete
+    optional: true
+  - group: block
+    event: block_rq_error
+    program: trace_block_rq_error
+    optional: true
+  - group: oom
+    event: mark_victim
+    program: trace_oom_mark_victim
+    optional: true
+  - group: sched
+    event: sched_process_hang
+    program: trace_sched_process_hang
+    optional: true
 
   - group: syscalls
     event: sys_enter_execve
@@ -281,7 +299,7 @@ schema:
       doc: process | file | network | memory | block
     - name: action
       type: TEXT NOT NULL DEFAULT ''
-      doc: exec, exit, fork, clone, open, read, write, rename, unlink, bind, connect, listen, ...
+      doc: "exec, exit, fork, clone, open, read, write, rename, unlink, bind, connect, listen, io, oom_kill, hang, slow_io (block latency_ns in metadata), error, ..."
     - name: pid
       type: INTEGER NOT NULL DEFAULT 0
       doc: process id
