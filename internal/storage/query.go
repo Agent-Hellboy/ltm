@@ -42,6 +42,34 @@ func (s *Store) Status(ctx context.Context) (Status, error) {
 	return status, nil
 }
 
+// TopEventSources returns the processes that produced the most events since the
+// given time, most active first. It backs the drop diagnostic in `ltm status`:
+// when the recorder is dropping events, one process dominating recent volume is
+// the signature of a runaway producer or a self-capture feedback loop, and its
+// comm names the culprit.
+func (s *Store) TopEventSources(ctx context.Context, since time.Time, limit int) ([]SourceCount, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT comm, COALESCE(MAX(exe), ''), COUNT(*) c
+		 FROM events WHERE ts >= ?
+		 GROUP BY comm ORDER BY c DESC LIMIT ?`, since.UnixNano(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SourceCount
+	for rows.Next() {
+		var sc SourceCount
+		if err := rows.Scan(&sc.Comm, &sc.Exe, &sc.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, sc)
+	}
+	return out, rows.Err()
+}
+
 // LatestEventID returns the highest event id currently stored (0 if empty).
 // `ltm watch` uses it as the starting cursor.
 func (s *Store) LatestEventID(ctx context.Context) (int64, error) {

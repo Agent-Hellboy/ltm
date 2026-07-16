@@ -19,6 +19,40 @@ func newTestStore(t *testing.T) *Store {
 	return store
 }
 
+func TestTopEventSources(t *testing.T) {
+	t.Parallel()
+	store := newTestStore(t)
+
+	base := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
+	var events []Event
+	// A self-capture loop: ltm dominates recent volume.
+	for i := range 20 {
+		events = append(events, Event{Timestamp: base.Add(time.Duration(i) * time.Second), Category: "file", Action: "read", PID: 999, Comm: "ltm", Exe: "/usr/bin/ltm"})
+	}
+	for i := range 3 {
+		events = append(events, Event{Timestamp: base.Add(time.Duration(i) * time.Second), Category: "file", Action: "write", PID: 42, Comm: "worker"})
+	}
+	// Old event outside the window must be excluded.
+	events = append(events, Event{Timestamp: base.Add(-time.Hour), Category: "file", Action: "read", PID: 7, Comm: "ancient"})
+	if _, err := store.InsertEvents(context.Background(), events); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := store.TopEventSources(context.Background(), base.Add(-time.Minute), 5)
+	if err != nil {
+		t.Fatalf("TopEventSources: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d sources, want 2 (ancient excluded by window): %+v", len(got), got)
+	}
+	if got[0].Comm != "ltm" || got[0].Count != 20 {
+		t.Fatalf("busiest source = %+v, want ltm x20", got[0])
+	}
+	if got[0].Exe != "/usr/bin/ltm" {
+		t.Errorf("expected exe carried through, got %q", got[0].Exe)
+	}
+}
+
 func TestStoreInsertAndQuery(t *testing.T) {
 	t.Parallel()
 	store := newTestStore(t)

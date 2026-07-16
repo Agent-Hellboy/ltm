@@ -10,6 +10,48 @@ import (
 	"ltm/internal/storage"
 )
 
+func TestWithSelfIgnoresCoversDBAndPIDFile(t *testing.T) {
+	got := withSelfIgnores([]string{"/proc"}, "/var/lib/ltm/ltm.db", "/run/ltm.pid")
+	set := make(map[string]bool, len(got))
+	for _, p := range got {
+		set[p] = true
+	}
+	want := []string{
+		"/proc",                       // caller's paths preserved
+		"/var/lib/ltm/ltm.db",         // db
+		"/var/lib/ltm/ltm.db-wal",     // WAL sidecar
+		"/var/lib/ltm/ltm.db-shm",     // shared-memory sidecar
+		"/var/lib/ltm/ltm.db-journal", // rollback-journal sidecar
+		"/run/ltm.pid",                // pid file
+	}
+	for _, w := range want {
+		if !set[w] {
+			t.Errorf("withSelfIgnores missing %q; got %v", w, got)
+		}
+	}
+}
+
+// A relative DB path must be resolved to absolute, because the collector filter
+// matches against the absolute paths eBPF observes (storage.Open opens the DB
+// by its absolute path).
+func TestWithSelfIgnoresResolvesRelativePaths(t *testing.T) {
+	got := withSelfIgnores(nil, "rel/ltm.db", "")
+	for _, p := range got {
+		if !filepath.IsAbs(p) {
+			t.Errorf("expected absolute ignore path, got %q", p)
+		}
+	}
+}
+
+// An empty pid file (or db) must not inject a bogus "" ignore rule that would
+// otherwise be normalized away — verify nothing empty leaks through.
+func TestWithSelfIgnoresSkipsEmpty(t *testing.T) {
+	got := withSelfIgnores(nil, "", "")
+	if len(got) != 0 {
+		t.Fatalf("expected no self-ignore paths for empty inputs, got %v", got)
+	}
+}
+
 type oneEventSource struct {
 	event storage.Event
 }

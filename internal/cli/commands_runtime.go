@@ -92,16 +92,60 @@ func runStatus(cfg Config, args []string) error {
 	}
 	pid, _ := readPIDFile(cfg.PIDFile)
 	alive := pid > 0 && processAlive(pid)
+
+	// When the recorder is dropping events, surface the processes producing the
+	// most recent volume so a runaway producer or self-capture feedback loop is
+	// diagnosable straight from `status`, without hand-writing SQL.
+	var sources []storage.SourceCount
+	if status.DroppedEvents > 0 && !status.LastEventTime.IsZero() {
+		sources, _ = store.TopEventSources(context.Background(), status.LastEventTime.Add(-5*time.Minute), 5)
+	}
+	selfLoop := containsSelfSource(sources)
+
 	if *jsonOut {
-		return writeJSON(os.Stdout, map[string]any{
-			"pid":    pid,
-			"alive":  alive,
-			"status": status,
-		})
+		out := map[string]any{"pid": pid, "alive": alive, "status": status}
+		if status.DroppedEvents > 0 {
+			out["diagnostics"] = map[string]any{
+				"suspected_feedback_loop": selfLoop,
+				"top_sources_recent":      sources,
+			}
+		}
+		return writeJSON(os.Stdout, out)
 	}
 	fmt.Fprintf(os.Stdout, "daemon: alive=%t pid=%d\n", alive, pid)
 	fmt.Fprintf(os.Stdout, "events=%d dropped=%d last_event=%s\n", status.EventCount, status.DroppedEvents, status.LastEventTime.Format(time.RFC3339))
+	printDropDiagnostic(os.Stdout, status.DroppedEvents, sources, selfLoop)
 	return nil
+}
+
+// containsSelfSource reports whether ltm itself is among the busiest recent
+// producers — the signature of the self-capture feedback loop (which means the
+// running recorder predates, or is missing, the kernel "ltm" comm filter).
+func containsSelfSource(sources []storage.SourceCount) bool {
+	for _, s := range sources {
+		if s.Comm == "ltm" {
+			return true
+		}
+	}
+	return false
+}
+
+func printDropDiagnostic(w io.Writer, dropped int64, sources []storage.SourceCount, selfLoop bool) {
+	if dropped == 0 {
+		return
+	}
+	fmt.Fprintf(w, "⚠ %d events dropped. Busiest producers (last 5m):\n", dropped)
+	for _, s := range sources {
+		exe := s.Exe
+		if exe == "" {
+			exe = "-"
+		}
+		fmt.Fprintf(w, "    %-16s %8d  %s\n", s.Comm, s.Count, exe)
+	}
+	if selfLoop {
+		fmt.Fprintln(w, "  → ltm is recording its own activity (feedback loop). Restart the recorder")
+		fmt.Fprintln(w, "    with a build that includes the self-capture filter: `ltm stop && ltm start`.")
+	}
 }
 
 func runTimeline(cfg Config, args []string) error {
@@ -342,6 +386,8 @@ func runDaemon(cfg Config, args []string) error {
 	defer store.Close()
 	svc := daemon.NewService(store, daemon.Config{
 		IgnorePaths: cfg.IgnorePaths,
+		DBPath:      cfg.DBPath,
+		PIDFile:     cfg.PIDFile,
 	})
 	ctx, cancel := signalContext()
 	defer cancel()

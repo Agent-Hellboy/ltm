@@ -32,19 +32,24 @@ Optional tracepoints (e.g. `clone3`, `mkdir`, `rmdir`, `block_rq_issue`,
 
 ## Ignore paths
 
-**BPF** (`collector.bpf.c`) drops only `/proc`, `/sys`, `/dev` (and the daemon's
-own PID).
+**BPF** (`collector.bpf.c`) drops only `/proc`, `/sys`, `/dev`, the daemon's
+own PID, and any task whose comm is `ltm` (the self-capture guard — see
+[security](security.md#self-capture-guard-feedback-loop)).
 
 **Userspace** (`internal/collector`) drops those again, plus package-manager
-caches and CLI defaults:
+caches, CLI defaults, and the recorder's own store/pid files:
 
 | Prefix | Where |
 |---|---|
 | `/proc`, `/sys`, `/dev` | BPF + userspace |
+| comm `ltm` | BPF |
 | `/var/cache/apt`, `/var/cache/dnf`, `/var/cache/pacman` | userspace |
 | `$HOME/.cache`, `$HOME/Library/Caches` | userspace (CLI defaults) |
+| DB path + `-wal`/`-shm`/`-journal`, pid file | userspace (auto, per daemon) |
 
-Add more at start time:
+The DB and pid file are added automatically from the daemon's `--db`/`--pidfile`
+values, so `ltm status`/`query` reading the store never feeds a capture loop —
+no `--ignore-path` needed. Add more at start time:
 
 ```bash
 sudo ltm --ignore-path /var/cache --ignore-path /tmp/scratch start

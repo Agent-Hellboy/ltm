@@ -145,14 +145,28 @@ static __always_inline void fill_common(event *ev) {
 	bpf_get_current_comm(ev->comm, sizeof(ev->comm));
 }
 
+// is_self_comm reports whether the calling task is one of the recorder's own
+// processes, matched by program name ("ltm"). self_pid below only covers the
+// long-lived daemon; sibling ltm invocations (status/query/timeline) are
+// separate short-lived processes with their own PIDs, and their reads of the
+// SQLite store would otherwise feed a capture->store->read->capture loop that
+// floods the ring buffer and inflates the drop counter. Matching on comm shuts
+// that loop at the source, before an event is ever reserved. The comparison is
+// fixed-index (like path_ignored_prefix) so the verifier sees a bounded check.
+static __always_inline int is_self_comm(void) {
+	char comm[COMM_LEN];
+	bpf_get_current_comm(comm, sizeof(comm));
+	return comm[0] == 'l' && comm[1] == 't' && comm[2] == 'm' && comm[3] == '\0';
+}
+
 static __always_inline int should_skip(void) {
 	__u32 zero = 0;
 	__u32 *self = bpf_map_lookup_elem(&self_pid, &zero);
-	if (!self) {
-		return 0;
-	}
 	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	return pid == *self;
+	if (self && pid == *self) {
+		return 1;
+	}
+	return is_self_comm();
 }
 
 static __always_inline int path_boundary(char c) {
