@@ -6,6 +6,10 @@
 #define PATH_MAX_LEN LTM_PATH_MAX_LEN
 #define COMM_LEN LTM_COMM_LEN
 
+// Only block I/O whose service time exceeds this is emitted as a slow_io event,
+// so the completion hook stays bounded instead of one row per I/O (Phase 3).
+#define SLOW_IO_NS 100000000ULL // 100 ms
+
 typedef struct ltm_kernel_event event;
 
 // Force bpf2go to emit a Go type for the event layout. The events ring buffer
@@ -22,6 +26,14 @@ struct path_state {
 struct fd_key {
 	__u32 pid;
 	__u32 fd;
+};
+
+// rq_key identifies an in-flight block request by device and starting sector,
+// so block_rq_complete can find the block_rq_issue timestamp and compute
+// service latency (Phase 3).
+struct rq_key {
+	__u32 dev;
+	__u64 sector;
 };
 
 struct sockaddr_in {
@@ -93,6 +105,47 @@ struct trace_block_rq_issue {
 	char comm[COMM_LEN];
 };
 
+// block_rq_complete / block_rq_error share a layout: a dev/sector/error record
+// (no comm). sector is 8-byte aligned, so there are 4 bytes of padding after
+// the 4-byte dev — matched by natural C alignment here.
+struct trace_block_rq_done {
+	unsigned short common_type;
+	unsigned char common_flags;
+	unsigned char common_preempt_count;
+	int common_pid;
+	__u32 dev;
+	__u64 sector;
+	__u32 nr_sector;
+	__s32 error;
+	char rwbs[8];
+	__u32 cmd; // __data_loc, unused
+};
+
+struct trace_oom_mark_victim {
+	unsigned short common_type;
+	unsigned char common_flags;
+	unsigned char common_preempt_count;
+	int common_pid;
+	int pid;
+	__u32 comm; // __data_loc char[]
+	unsigned long total_vm;
+	unsigned long anon_rss;
+	unsigned long file_rss;
+	unsigned long shmem_rss;
+	__u32 uid;
+	unsigned long pgtables;
+	short oom_score_adj;
+};
+
+struct trace_sched_process_hang {
+	unsigned short common_type;
+	unsigned char common_flags;
+	unsigned char common_preempt_count;
+	int common_pid;
+	char comm[COMM_LEN];
+	int pid;
+};
+
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 1 << 24);
@@ -125,6 +178,14 @@ struct {
 	__type(value, __u64);
 	__uint(max_entries, 1);
 } ringbuf_drops SEC(".maps");
+
+// rq_start maps an in-flight block request to its issue timestamp (ns).
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, struct rq_key);
+	__type(value, __u64);
+	__uint(max_entries, 16384);
+} rq_start SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -428,6 +489,13 @@ int trace_sched_process_exit(struct trace_sched_process_exit *ctx) {
 
 SEC("tracepoint/block/block_rq_issue")
 int trace_block_rq_issue(struct trace_block_rq_issue *ctx) {
+	// Stamp the request's issue time for latency correlation on completion.
+	// Done unconditionally (before should_skip): completion runs in softirq
+	// where the current task is unrelated, so per-comm filtering doesn't apply.
+	struct rq_key k = {.dev = ctx->dev, .sector = ctx->sector};
+	__u64 issued = bpf_ktime_get_ns();
+	bpf_map_update_elem(&rq_start, &k, &issued, BPF_ANY);
+
 	if (should_skip()) {
 		return 0;
 	}
@@ -755,6 +823,88 @@ int trace_sys_enter_recvmsg(struct trace_sys_enter *ctx) {
 SEC("tracepoint/syscalls/sys_enter_shutdown")
 int trace_sys_enter_shutdown(struct trace_sys_enter *ctx) {
 	return emit_fd_io(ctx, "network", "shutdown", (__u32)ctx->args[0], ctx->args[1], ctx->id);
+}
+
+// ---- Phase 2/3: disk-latency correlation and discrete fault events ----
+// These run in kernel/softirq/oom context where the current task is unrelated
+// to the fault, so they skip should_skip() and set the meaningful identity
+// (victim pid/comm, device) explicitly rather than from current.
+
+SEC("tracepoint/block/block_rq_complete")
+int trace_block_rq_complete(struct trace_block_rq_done *ctx) {
+	struct rq_key k = {.dev = ctx->dev, .sector = ctx->sector};
+	__u64 *issued = bpf_map_lookup_elem(&rq_start, &k);
+	if (!issued) {
+		return 0; // no matching issue (e.g. started before attach)
+	}
+	__u64 latency = bpf_ktime_get_ns() - *issued;
+	bpf_map_delete_elem(&rq_start, &k);
+	if (latency < SLOW_IO_NS) {
+		return 0; // only extreme latency is worth a row
+	}
+	event *ev = reserve_event();
+	if (!ev) {
+		return 0;
+	}
+	fill_common(ev);
+	set_category_action(ev, "block", "slow_io");
+	ev->bytes = latency; // service latency in nanoseconds
+	ev->aux = ctx->dev;
+	ev->syscall_nr = ctx->nr_sector;
+	__builtin_memcpy(ev->path, ctx->rwbs, 8);
+	submit(ev);
+	return 0;
+}
+
+SEC("tracepoint/block/block_rq_error")
+int trace_block_rq_error(struct trace_block_rq_done *ctx) {
+	event *ev = reserve_event();
+	if (!ev) {
+		return 0;
+	}
+	fill_common(ev);
+	set_category_action(ev, "block", "error");
+	ev->aux = ctx->dev;
+	ev->fd = ctx->error; // negative errno
+	ev->syscall_nr = ctx->nr_sector;
+	ev->bytes = ctx->sector;
+	__builtin_memcpy(ev->path, ctx->rwbs, 8);
+	submit(ev);
+	return 0;
+}
+
+SEC("tracepoint/oom/mark_victim")
+int trace_oom_mark_victim(struct trace_oom_mark_victim *ctx) {
+	event *ev = reserve_event();
+	if (!ev) {
+		return 0;
+	}
+	fill_common(ev);
+	set_category_action(ev, "memory", "oom_kill");
+	ev->pid = ctx->pid; // the victim, not the process that triggered OOM
+	ev->uid = ctx->uid;
+	// rss counters are in pages; report the resident total in bytes.
+	ev->bytes = (ctx->anon_rss + ctx->file_rss + ctx->shmem_rss) * 4096;
+	// Victim comm is a __data_loc string: the low 16 bits of the field are the
+	// byte offset of the string from the record base.
+	__u32 comm_off = ctx->comm & 0xffff;
+	bpf_probe_read_kernel_str(ev->comm, sizeof(ev->comm), (char *)ctx + comm_off);
+	submit(ev);
+	return 0;
+}
+
+SEC("tracepoint/sched/sched_process_hang")
+int trace_sched_process_hang(struct trace_sched_process_hang *ctx) {
+	event *ev = reserve_event();
+	if (!ev) {
+		return 0;
+	}
+	fill_common(ev);
+	set_category_action(ev, "process", "hang");
+	ev->pid = ctx->pid;
+	__builtin_memcpy(ev->comm, ctx->comm, sizeof(ev->comm));
+	submit(ev);
+	return 0;
 }
 
 char LICENSE[] SEC("license") = "Dual MIT/GPL";

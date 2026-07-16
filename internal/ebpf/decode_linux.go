@@ -51,12 +51,26 @@ func convertKernelEvent(bootTime time.Time, ke collectorEvent, dropped uint64) s
 		// Block events reuse the generic fields to carry disk-request data:
 		// ke.Path is the rwbs flag string, ke.Aux the device, ke.SyscallNr the
 		// sector count. Replace the misleading generic metadata accordingly.
+		rwbs := cstring(ke.Path[:])
 		ev.Path = ""
 		ev.Metadata = map[string]any{
 			"dev":       ke.Aux,
 			"nr_sector": ke.SyscallNr,
-			"rwbs":      cstring(ke.Path[:]),
+			"rwbs":      rwbs,
 		}
+		switch ev.Action {
+		case "slow_io":
+			// Phase 3: ke.Bytes carries the issue→complete service latency (ns).
+			ev.Metadata["latency_ns"] = ke.Bytes
+		case "error":
+			ev.Metadata["errno"] = ke.Fd
+			ev.Metadata["sector"] = ke.Bytes
+		}
+	}
+	if ev.Category == "memory" && ev.Action == "oom_kill" {
+		// Phase 2: ke.Bytes carries the victim's resident set size in bytes; pid
+		// and uid are the victim's (set in the BPF program, not the current task).
+		ev.Metadata = map[string]any{"rss_bytes": ke.Bytes}
 	}
 	if ev.Category == "process" && ev.Action == "fork" && ke.Aux != 0 {
 		ev.PPID = int(ke.Aux)
