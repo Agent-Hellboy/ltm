@@ -11,10 +11,10 @@ import (
 	"ltm/internal/abi"
 )
 
-// TestSchemaMatchesGenerated is the schema-side ground-truth check. It creates a
-// real store, reads the live table's columns with PRAGMA table_info, and asserts
-// they are exactly the generated eventColumns and that abi.SchemaDoc documents
-// the same ordered column list. Because all of these derive from abi.yaml, a
+// TestSchemaMatchesGenerated is the schema-side ground-truth check. For every
+// persisted table it reads the live columns with PRAGMA table_info and asserts
+// they are exactly the generated column-list constant and that abi.SchemaDoc
+// documents the same ordered list. Because all of these derive from abi.yaml, a
 // mismatch means the generator outputs disagree or the generated files are
 // stale — run `go generate ./internal/abi/`.
 func TestSchemaMatchesGenerated(t *testing.T) {
@@ -24,12 +24,30 @@ func TestSchemaMatchesGenerated(t *testing.T) {
 	}
 	defer store.Close()
 
-	rows, err := store.db.QueryContext(context.Background(), `PRAGMA table_info(events)`)
+	docByTable := schemaDocColumns(abi.SchemaDoc)
+	tables := map[string]string{
+		"events":          eventColumns,
+		"system_samples":  systemSamplesColumns,
+		"process_samples": processSamplesColumns,
+	}
+	for table, genColumns := range tables {
+		live := liveColumns(t, store, table)
+		if strings.Join(live, ", ") != genColumns {
+			t.Fatalf("%s: live columns disagree with generated constant\n live: %v\n gen:  %v", table, live, strings.Split(genColumns, ", "))
+		}
+		if !slices.Equal(live, docByTable[table]) {
+			t.Fatalf("%s: abi.SchemaDoc columns disagree with live table\n live: %v\n doc:  %v", table, live, docByTable[table])
+		}
+	}
+}
+
+func liveColumns(t *testing.T, store *Store, table string) []string {
+	t.Helper()
+	rows, err := store.db.QueryContext(context.Background(), `PRAGMA table_info(`+table+`)`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-
 	var live []string
 	for rows.Next() {
 		var (
@@ -45,30 +63,28 @@ func TestSchemaMatchesGenerated(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-
-	want := strings.Split(eventColumns, ", ")
-	if strings.Join(live, ", ") != eventColumns {
-		t.Fatalf("live table columns disagree with generated eventColumns\n live: %v\n gen:  %v", live, want)
-	}
-
-	docCols := schemaDocColumns(abi.SchemaDoc)
-	if !slices.Equal(live, docCols) {
-		t.Fatalf("abi.SchemaDoc columns disagree with live table\n live: %v\n doc:  %v", live, docCols)
-	}
+	return live
 }
 
-func schemaDocColumns(doc string) []string {
-	lines := strings.Split(doc, "\n")
-	cols := make([]string, 0, len(lines))
-	for _, line := range lines {
+// schemaDocColumns parses abi.SchemaDoc into per-table ordered column lists.
+// Sections begin with a "Table: <name>" line; column lines are indented two
+// spaces; the "Indexes:" line ends a section.
+func schemaDocColumns(doc string) map[string][]string {
+	out := make(map[string][]string)
+	var table string
+	for _, line := range strings.Split(doc, "\n") {
+		if rest, ok := strings.CutPrefix(line, "Table: "); ok {
+			table = strings.Fields(rest)[0] // name, before any " (doc)"
+			continue
+		}
 		if !strings.HasPrefix(line, "  ") {
 			continue
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 2 {
+		if len(fields) < 2 || table == "" {
 			continue
 		}
-		cols = append(cols, fields[0])
+		out[table] = append(out[table], fields[0])
 	}
-	return cols
+	return out
 }

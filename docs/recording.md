@@ -70,6 +70,25 @@ layout changed. The generated `collector_bpfel.o` and `collector_bpfel.go` are
 checked in, rebuilt in CI, and should not be hand-edited. Headers under
 `internal/ebpf/headers/` are minimal stubs, not a full vmlinux/libbpf tree.
 
+## Resource sampling (Phase 1)
+
+Alongside the per-event activity log, the daemon runs a userspace sampler
+(`internal/sample`) that reads `/proc` + PSI — no eBPF, Linux only. It writes
+two tables, queryable with `ltm query sql` (see their columns in
+`ltm query sql` with no argument):
+
+- `system_samples` (~1s): CPU %, load, runnable/blocked, memory/swap,
+  CPU/memory/I/O pressure (PSI avg10), aggregate disk and network throughput.
+- `process_samples` (~5s): per-process CPU %, RSS, state, threads, cumulative
+  I/O, cgroup — one row per process per tick.
+
+`ltm status` prints the latest system sample as a one-liner. Rates (CPU %,
+disk, network) are deltas over the interval since the previous sample, so the
+first sample after start reports zero rates. Cadence is set on
+`daemon.Config` (`SystemSampleEvery`/`ProcessSampleEvery`; negative disables a
+sampler). `ltm prune` trims these tables with the same cutoff as `events` —
+relevant because `process_samples` grows with process count.
+
 ## Limitations
 
 - **Arch** — recording x86_64 only; arm64 binaries can query but not attach this

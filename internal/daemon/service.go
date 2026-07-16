@@ -22,6 +22,11 @@ type Config struct {
 	PIDFile     string
 	BatchSize   int
 	FlushPeriod time.Duration
+	// SystemSampleEvery / ProcessSampleEvery set the resource-sampling cadence
+	// (Phase 1: /proc + PSI). Zero uses the defaults; a negative value disables
+	// that sampler.
+	SystemSampleEvery  time.Duration
+	ProcessSampleEvery time.Duration
 }
 
 const (
@@ -29,6 +34,9 @@ const (
 	defaultMaxFlushBatchSize = 16384
 	defaultIngestBufferSize  = 65536
 	defaultSourceBufferSize  = 65536
+
+	defaultSystemSampleEvery  = 1 * time.Second
+	defaultProcessSampleEvery = 5 * time.Second
 )
 
 type Service struct {
@@ -42,6 +50,12 @@ func NewService(store *storage.Store, cfg Config) *Service {
 	}
 	if cfg.FlushPeriod <= 0 {
 		cfg.FlushPeriod = 1 * time.Second
+	}
+	if cfg.SystemSampleEvery == 0 {
+		cfg.SystemSampleEvery = defaultSystemSampleEvery
+	}
+	if cfg.ProcessSampleEvery == 0 {
+		cfg.ProcessSampleEvery = defaultProcessSampleEvery
 	}
 	return &Service{store: store, cfg: cfg}
 }
@@ -112,6 +126,15 @@ func (s *Service) runWithSource(ctx context.Context, src ebpf.EventSource) error
 		flushErr <- s.flushLoop(ctx, ingest, col.DroppedEvents)
 	}()
 
+	// Independent side timeline: /proc + PSI resource samples written straight
+	// to the store on their own cadence. It does not feed the event pipeline,
+	// so it is joined separately (before the store is closed by the caller).
+	sampleDone := make(chan struct{})
+	go func() {
+		defer close(sampleDone)
+		s.sampleLoop(ctx)
+	}()
+
 	var runErr error
 	colDone := false
 	flushDone := false
@@ -124,6 +147,7 @@ func (s *Service) runWithSource(ctx context.Context, src ebpf.EventSource) error
 	}
 
 	cancel()
+	<-sampleDone // sampler stops on cancel; join before the store closes
 	if !colDone {
 		if cerr := <-colErr; cerr != nil && runErr == nil {
 			runErr = cerr

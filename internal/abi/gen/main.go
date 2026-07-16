@@ -71,7 +71,11 @@ type kernelEvent struct {
 type abiDoc struct {
 	Tracepoints []tracepoint `yaml:"tracepoints"`
 	Schema      schema       `yaml:"schema"`
-	KernelEvent kernelEvent  `yaml:"kernel_event"`
+	// SampleTables are additional persisted tables (the resource-sampling
+	// timeline) generated through the same DDL/SchemaDoc path as Schema. They
+	// carry no version of their own — the whole DB shares Schema.Version.
+	SampleTables []schema    `yaml:"sample_tables"`
+	KernelEvent  kernelEvent `yaml:"kernel_event"`
 }
 
 func main() {
@@ -117,10 +121,10 @@ func run(in, tpOut, schemaOut, storeOut, headerOut string) error {
 	if err := writeGo(tpOut, tracepointsFile(in, doc.Tracepoints)); err != nil {
 		return err
 	}
-	if err := writeGo(schemaOut, schemaABIFile(in, &doc.Schema)); err != nil {
+	if err := writeGo(schemaOut, schemaABIFile(in, &doc.Schema, doc.SampleTables)); err != nil {
 		return err
 	}
-	if err := writeGo(storeOut, schemaStoreFile(in, &doc.Schema)); err != nil {
+	if err := writeGo(storeOut, schemaStoreFile(in, &doc.Schema, doc.SampleTables)); err != nil {
 		return err
 	}
 	return os.WriteFile(headerOut, kernelEventHeader(in, &doc.KernelEvent), 0o644)
@@ -151,35 +155,30 @@ func validate(doc *abiDoc) error {
 	if s.Version <= 0 {
 		return fmt.Errorf("schema.version must be positive, got %d", s.Version)
 	}
-	if s.Table == "" {
-		return fmt.Errorf("empty schema.table")
+	if err := validateTable(s); err != nil {
+		return err
 	}
-	if len(s.Columns) == 0 {
-		return fmt.Errorf("schema declares no columns")
-	}
-	cols := make(map[string]bool, len(s.Columns))
-	for _, c := range s.Columns {
-		if c.Name == "" || c.Type == "" {
-			return fmt.Errorf("column with empty name or type")
-		}
-		if cols[c.Name] {
-			return fmt.Errorf("duplicate column %q", c.Name)
-		}
-		cols[c.Name] = true
-	}
-	seenIndex := make(map[string]bool, len(s.Indexes))
+
+	// Sample tables reuse the same shape/validation as the primary schema but
+	// carry no version; their names must not collide with each other or events.
+	seenTable := map[string]bool{s.Table: true}
+	seenIndexGlobal := make(map[string]bool)
 	for _, idx := range s.Indexes {
-		if idx.Name == "" || len(idx.Columns) == 0 {
-			return fmt.Errorf("index %q has no name or columns", idx.Name)
+		seenIndexGlobal[idx.Name] = true
+	}
+	for _, st := range doc.SampleTables {
+		if err := validateTable(st); err != nil {
+			return err
 		}
-		if seenIndex[idx.Name] {
-			return fmt.Errorf("duplicate index %q", idx.Name)
+		if seenTable[st.Table] {
+			return fmt.Errorf("duplicate table %q", st.Table)
 		}
-		seenIndex[idx.Name] = true
-		for _, col := range idx.Columns {
-			if !cols[col] {
-				return fmt.Errorf("index %q references unknown column %q", idx.Name, col)
+		seenTable[st.Table] = true
+		for _, idx := range st.Indexes {
+			if seenIndexGlobal[idx.Name] {
+				return fmt.Errorf("duplicate index %q", idx.Name)
 			}
+			seenIndexGlobal[idx.Name] = true
 		}
 	}
 
@@ -231,6 +230,45 @@ func validate(doc *abiDoc) error {
 	return nil
 }
 
+// validateTable checks a table's columns and indexes (name/type non-empty, no
+// duplicate columns or indexes, indexes reference declared columns). Shared by
+// the primary events schema and every sample table; version is validated by
+// the caller only where it applies.
+func validateTable(s schema) error {
+	if s.Table == "" {
+		return fmt.Errorf("empty table name")
+	}
+	if len(s.Columns) == 0 {
+		return fmt.Errorf("table %q declares no columns", s.Table)
+	}
+	cols := make(map[string]bool, len(s.Columns))
+	for _, c := range s.Columns {
+		if c.Name == "" || c.Type == "" {
+			return fmt.Errorf("table %q: column with empty name or type", s.Table)
+		}
+		if cols[c.Name] {
+			return fmt.Errorf("table %q: duplicate column %q", s.Table, c.Name)
+		}
+		cols[c.Name] = true
+	}
+	seenIndex := make(map[string]bool, len(s.Indexes))
+	for _, idx := range s.Indexes {
+		if idx.Name == "" || len(idx.Columns) == 0 {
+			return fmt.Errorf("table %q: index %q has no name or columns", s.Table, idx.Name)
+		}
+		if seenIndex[idx.Name] {
+			return fmt.Errorf("table %q: duplicate index %q", s.Table, idx.Name)
+		}
+		seenIndex[idx.Name] = true
+		for _, col := range idx.Columns {
+			if !cols[col] {
+				return fmt.Errorf("table %q: index %q references unknown column %q", s.Table, idx.Name, col)
+			}
+		}
+	}
+	return nil
+}
+
 func tracepointsFile(in string, tps []tracepoint) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("package abi\n\n")
@@ -252,34 +290,15 @@ func tracepointsFile(in string, tps []tracepoint) []byte {
 	return prependGoHeader(in, buf.Bytes())
 }
 
-// schemaABIFile renders package abi: SchemaVersion and the human-readable SchemaDoc.
-func schemaABIFile(in string, s *schema) []byte {
-	width := 0
-	for _, c := range s.Columns {
-		if len(c.Name) > width {
-			width = len(c.Name)
-		}
-	}
-
+// schemaABIFile renders package abi: SchemaVersion and the human-readable
+// SchemaDoc covering the events table and every sample table.
+func schemaABIFile(in string, s *schema, sampleTables []schema) []byte {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Table: %s", s.Table)
-	if s.TableDoc != "" {
-		fmt.Fprintf(&sb, " (%s)", s.TableDoc)
+	tableDoc(&sb, s)
+	for _, st := range sampleTables {
+		sb.WriteString("\n\n")
+		tableDoc(&sb, &st)
 	}
-	sb.WriteString("\n")
-	for _, c := range s.Columns {
-		baseType := strings.Fields(c.Type)[0] // INTEGER / TEXT, not the full constraint
-		fmt.Fprintf(&sb, "  %-*s  %-7s  %s\n", width, c.Name, baseType, c.Doc)
-	}
-	parts := make([]string, len(s.Indexes))
-	for i, idx := range s.Indexes {
-		if len(idx.Columns) == 1 {
-			parts[i] = idx.Columns[0]
-		} else {
-			parts[i] = "(" + strings.Join(idx.Columns, ", ") + ")"
-		}
-	}
-	fmt.Fprintf(&sb, "\nIndexes: %s", strings.Join(parts, ", "))
 
 	var buf bytes.Buffer
 	buf.WriteString("package abi\n\n")
@@ -290,8 +309,68 @@ func schemaABIFile(in string, s *schema) []byte {
 	return prependGoHeader(in, buf.Bytes())
 }
 
-// schemaStoreFile renders package storage: the DDL statements and column lists.
-func schemaStoreFile(in string, s *schema) []byte {
+// tableDoc renders one table's human-readable column/index listing into sb.
+func tableDoc(sb *strings.Builder, s *schema) {
+	width := 0
+	for _, c := range s.Columns {
+		if len(c.Name) > width {
+			width = len(c.Name)
+		}
+	}
+	fmt.Fprintf(sb, "Table: %s", s.Table)
+	if s.TableDoc != "" {
+		fmt.Fprintf(sb, " (%s)", s.TableDoc)
+	}
+	sb.WriteString("\n")
+	for _, c := range s.Columns {
+		baseType := strings.Fields(c.Type)[0] // INTEGER / TEXT / REAL, not the full constraint
+		fmt.Fprintf(sb, "  %-*s  %-7s  %s\n", width, c.Name, baseType, c.Doc)
+	}
+	parts := make([]string, len(s.Indexes))
+	for i, idx := range s.Indexes {
+		if len(idx.Columns) == 1 {
+			parts[i] = idx.Columns[0]
+		} else {
+			parts[i] = "(" + strings.Join(idx.Columns, ", ") + ")"
+		}
+	}
+	fmt.Fprintf(sb, "\nIndexes: %s", strings.Join(parts, ", "))
+}
+
+// schemaStoreFile renders package storage: the DDL statements (events + every
+// sample table) and per-table column lists. The events table keeps its
+// historical constant names (eventColumns/insertColumns/insertPlaceholders);
+// each sample table gets <goName>Columns/InsertColumns/InsertPlaceholders.
+func schemaStoreFile(in string, s *schema, sampleTables []schema) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("package storage\n\n")
+
+	buf.WriteString("var schemaStatements = []string{\n")
+	writeTableStatements(&buf, s)
+	for i := range sampleTables {
+		writeTableStatements(&buf, &sampleTables[i])
+	}
+	buf.WriteString("}\n\n")
+
+	all, insert := columnLists(s)
+	fmt.Fprintf(&buf, "const eventColumns = %s\n\n", backquote(strings.Join(all, ", ")))
+	fmt.Fprintf(&buf, "const insertColumns = %s\n\n", backquote(strings.Join(insert, ", ")))
+	fmt.Fprintf(&buf, "const insertPlaceholders = %s\n", backquote(placeholders(len(insert))))
+
+	for i := range sampleTables {
+		st := &sampleTables[i]
+		base := goName(st.Table)
+		a, ins := columnLists(st)
+		fmt.Fprintf(&buf, "\n\nconst %sColumns = %s\n\n", base, backquote(strings.Join(a, ", ")))
+		fmt.Fprintf(&buf, "const %sInsertColumns = %s\n\n", base, backquote(strings.Join(ins, ", ")))
+		fmt.Fprintf(&buf, "const %sInsertPlaceholders = %s\n", base, backquote(placeholders(len(ins))))
+	}
+	return prependGoHeader(in, buf.Bytes())
+}
+
+// writeTableStatements appends one table's CREATE TABLE + CREATE INDEX
+// statements to the schemaStatements slice literal being built in buf.
+func writeTableStatements(buf *bytes.Buffer, s *schema) {
 	var ddl strings.Builder
 	fmt.Fprintf(&ddl, "CREATE TABLE IF NOT EXISTS %s (\n", s.Table)
 	for i, c := range s.Columns {
@@ -302,29 +381,44 @@ func schemaStoreFile(in string, s *schema) []byte {
 		fmt.Fprintf(&ddl, "\t%s %s%s\n", c.Name, c.Type, comma)
 	}
 	ddl.WriteString(")")
+	fmt.Fprintf(buf, "\t%s,\n", backquote(ddl.String()))
+	for _, idx := range s.Indexes {
+		stmt := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", idx.Name, s.Table, strings.Join(idx.Columns, ", "))
+		fmt.Fprintf(buf, "\t%s,\n", backquote(stmt))
+	}
+}
 
-	var all, insert []string
+// columnLists returns the full column list and the insertable subset (columns
+// with insert != false), preserving declaration order.
+func columnLists(s *schema) (all, insert []string) {
 	for _, c := range s.Columns {
 		all = append(all, c.Name)
 		if c.inserted() {
 			insert = append(insert, c.Name)
 		}
 	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(insert)), ", ")
+	return all, insert
+}
 
-	var buf bytes.Buffer
-	buf.WriteString("package storage\n\n")
-	buf.WriteString("var schemaStatements = []string{\n")
-	fmt.Fprintf(&buf, "\t%s,\n", backquote(ddl.String()))
-	for _, idx := range s.Indexes {
-		stmt := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", idx.Name, s.Table, strings.Join(idx.Columns, ", "))
-		fmt.Fprintf(&buf, "\t%s,\n", backquote(stmt))
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
+}
+
+// goName turns a snake_case table name into an unexported Go identifier base,
+// e.g. "system_samples" -> "systemSamples".
+func goName(table string) string {
+	var b strings.Builder
+	for i, p := range strings.Split(table, "_") {
+		if p == "" {
+			continue
+		}
+		if i == 0 {
+			b.WriteString(p)
+		} else {
+			b.WriteString(strings.ToUpper(p[:1]) + p[1:])
+		}
 	}
-	buf.WriteString("}\n\n")
-	fmt.Fprintf(&buf, "const eventColumns = %s\n\n", backquote(strings.Join(all, ", ")))
-	fmt.Fprintf(&buf, "const insertColumns = %s\n\n", backquote(strings.Join(insert, ", ")))
-	fmt.Fprintf(&buf, "const insertPlaceholders = %s\n", backquote(placeholders))
-	return prependGoHeader(in, buf.Bytes())
+	return b.String()
 }
 
 // kernelEventHeader renders the C header describing the kernel->userspace wire

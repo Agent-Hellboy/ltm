@@ -23,6 +23,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Resource sampling timeline (observability Phase 1).** A userspace sampler
+  reads `/proc` + PSI and records two new tables, queryable via `ltm query sql`:
+  - `system_samples` (~1s): CPU %, load, runnable/blocked procs, memory/swap,
+    CPU/memory/I/O pressure (PSI avg10), aggregate disk and network throughput.
+  - `process_samples` (~5s): per-process CPU %, RSS, state, thread count,
+    cumulative I/O, and cgroup — for every process.
+  Cadence is configurable via `daemon.Config` (`SystemSampleEvery` /
+  `ProcessSampleEvery`; a negative value disables that sampler). `Prune` now
+  trims these tables alongside `events`. Sampling is Linux-only (no-op stub
+  elsewhere) and needs no eBPF. Schema codegen (`abi.yaml` → generated DDL +
+  `SchemaDoc`) now supports multiple tables.
+- **System resource line in `ltm status`.** Shows the latest sample
+  (cpu/load/mem/swap/PSI); included in `--json` under `system`.
 - **Feedback-loop diagnostic in `ltm status`.** When events are being dropped,
   `status` now prints the busiest recent producers and flags a suspected loop
   if `ltm` itself is among them. Included in `--json` output under

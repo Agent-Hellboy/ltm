@@ -350,6 +350,64 @@ schema:
     - name: idx_events_cat_action_ts
       columns: [category, action, ts]
 
+# ---- resource/pressure sampling timeline (Phase 1: /proc + PSI, no eBPF) ----
+# Low-frequency machine-state samples, distinct from the per-event activity log
+# above. Written by the userspace sampler (internal/sample) on the daemon, not
+# by the kernel. system_samples is one row per system-wide tick (~1s);
+# process_samples is one row per process per tick (~5s). Same generated DDL +
+# SchemaDoc path as events; no version of their own (they share SchemaVersion).
+sample_tables:
+  - table: system_samples
+    table_doc: one row per system-wide resource sample (~1s cadence)
+    columns:
+      - {name: id, type: INTEGER PRIMARY KEY AUTOINCREMENT, insert: false, doc: "row id, insertion order"}
+      - {name: ts, type: INTEGER NOT NULL, doc: "unix nanoseconds; format with datetime(ts/1e9,'unixepoch')"}
+      - {name: cpu_pct, type: REAL NOT NULL DEFAULT 0, doc: CPU busy percent over the interval (0-100)}
+      - {name: load1, type: REAL NOT NULL DEFAULT 0, doc: 1-minute load average}
+      - {name: load5, type: REAL NOT NULL DEFAULT 0, doc: 5-minute load average}
+      - {name: load15, type: REAL NOT NULL DEFAULT 0, doc: 15-minute load average}
+      - {name: procs_running, type: INTEGER NOT NULL DEFAULT 0, doc: runnable processes}
+      - {name: procs_blocked, type: INTEGER NOT NULL DEFAULT 0, doc: processes blocked on I/O}
+      - {name: mem_total_kb, type: INTEGER NOT NULL DEFAULT 0, doc: total RAM (kB)}
+      - {name: mem_available_kb, type: INTEGER NOT NULL DEFAULT 0, doc: available RAM (kB)}
+      - {name: swap_total_kb, type: INTEGER NOT NULL DEFAULT 0, doc: total swap (kB)}
+      - {name: swap_free_kb, type: INTEGER NOT NULL DEFAULT 0, doc: free swap (kB)}
+      - {name: psi_cpu_some_avg10, type: REAL NOT NULL DEFAULT 0, doc: CPU pressure some avg10 (percent)}
+      - {name: psi_mem_some_avg10, type: REAL NOT NULL DEFAULT 0, doc: memory pressure some avg10 (percent)}
+      - {name: psi_mem_full_avg10, type: REAL NOT NULL DEFAULT 0, doc: memory pressure full avg10 (percent)}
+      - {name: psi_io_some_avg10, type: REAL NOT NULL DEFAULT 0, doc: I/O pressure some avg10 (percent)}
+      - {name: psi_io_full_avg10, type: REAL NOT NULL DEFAULT 0, doc: I/O pressure full avg10 (percent)}
+      - {name: disk_read_kb, type: INTEGER NOT NULL DEFAULT 0, doc: disk read over the interval (kB)}
+      - {name: disk_write_kb, type: INTEGER NOT NULL DEFAULT 0, doc: disk write over the interval (kB)}
+      - {name: net_rx_kb, type: INTEGER NOT NULL DEFAULT 0, doc: network received over the interval (kB)}
+      - {name: net_tx_kb, type: INTEGER NOT NULL DEFAULT 0, doc: network transmitted over the interval (kB)}
+      - {name: net_rx_errs, type: INTEGER NOT NULL DEFAULT 0, doc: receive errors over the interval}
+      - {name: net_tx_errs, type: INTEGER NOT NULL DEFAULT 0, doc: transmit errors over the interval}
+      - {name: net_rx_drop, type: INTEGER NOT NULL DEFAULT 0, doc: receive drops over the interval}
+      - {name: net_tx_drop, type: INTEGER NOT NULL DEFAULT 0, doc: transmit drops over the interval}
+    indexes:
+      - name: idx_system_samples_ts
+        columns: [ts]
+  - table: process_samples
+    table_doc: one row per process per sample (~5s cadence)
+    columns:
+      - {name: id, type: INTEGER PRIMARY KEY AUTOINCREMENT, insert: false, doc: "row id, insertion order"}
+      - {name: ts, type: INTEGER NOT NULL, doc: "unix nanoseconds; format with datetime(ts/1e9,'unixepoch')"}
+      - {name: pid, type: INTEGER NOT NULL DEFAULT 0, doc: process id}
+      - {name: comm, type: TEXT NOT NULL DEFAULT '', doc: process name}
+      - {name: state, type: TEXT NOT NULL DEFAULT '', doc: 'process state: R S D Z T I'}
+      - {name: cpu_pct, type: REAL NOT NULL DEFAULT 0, doc: CPU percent over the interval (0-100 per core)}
+      - {name: rss_kb, type: INTEGER NOT NULL DEFAULT 0, doc: resident set size (kB)}
+      - {name: threads, type: INTEGER NOT NULL DEFAULT 0, doc: thread count}
+      - {name: read_bytes, type: INTEGER NOT NULL DEFAULT 0, doc: cumulative bytes read (rchar)}
+      - {name: write_bytes, type: INTEGER NOT NULL DEFAULT 0, doc: cumulative bytes written (wchar)}
+      - {name: cgroup, type: TEXT NOT NULL DEFAULT '', doc: cgroup path}
+    indexes:
+      - name: idx_process_samples_ts
+        columns: [ts]
+      - name: idx_process_samples_pid_ts
+        columns: [pid, ts]
+
 # ---- kernel->userspace transport ABI ----
 # The byte-for-byte layout the eBPF program writes and userspace decodes. It is
 # generated into internal/abi/kernel_event.gen.h (C), which collector.bpf.c

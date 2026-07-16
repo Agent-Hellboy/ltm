@@ -41,6 +41,29 @@ func TestPrintDropDiagnosticQuietWhenNoDrops(t *testing.T) {
 	}
 }
 
+func TestFormatResourceLine(t *testing.T) {
+	line := formatResourceLine(storage.SystemSample{
+		CPUPct: 38.4, Load1: 2.10,
+		MemTotalKB: 1000, MemAvailableKB: 390, // 61% used
+		SwapTotalKB: 0, SwapFreeKB: 0, // no swap -> 0%
+		PSICPUSomeAvg10: 12.0, PSIMemSomeAvg10: 3.0, PSIIOSomeAvg10: 1.0,
+	})
+	for _, want := range []string{"cpu=38%", "load=2.10", "mem=61%", "swap=0%", "12.0/3.0/1.0"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("resource line %q missing %q", line, want)
+		}
+	}
+}
+
+func TestPctUsed(t *testing.T) {
+	if got := pctUsed(0, 0); got != 0 {
+		t.Errorf("pctUsed(0,0) = %v, want 0 (no divide-by-zero)", got)
+	}
+	if got := pctUsed(250, 1000); got != 75 {
+		t.Errorf("pctUsed(250,1000) = %v, want 75", got)
+	}
+}
+
 func newTestStore(t *testing.T) *storage.Store {
 	t.Helper()
 	store, err := storage.Open(filepath.Join(t.TempDir(), "ltm.db"))
